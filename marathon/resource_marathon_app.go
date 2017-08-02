@@ -189,6 +189,10 @@ func resourceMarathonApp() *schema.Resource {
 																Type:     schema.TypeMap,
 																Optional: true,
 															},
+															"name": &schema.Schema{
+																Type:     schema.TypeString,
+																Optional: true,
+															},
 														},
 													},
 												},
@@ -221,6 +225,26 @@ func resourceMarathonApp() *schema.Resource {
 												"mode": &schema.Schema{
 													Type:     schema.TypeString,
 													Optional: true,
+												},
+												"external": &schema.Schema{
+													Type:     schema.TypeList,
+													Optional: true,
+													Elem: &schema.Resource{
+														Schema: map[string]*schema.Schema {
+															"options": &schema.Schema{
+																Type:     schema.TypeMap,
+																Optional: true,
+															},
+															"name": &schema.Schema{
+																Type:     schema.TypeString,
+																Optional: true,
+															},
+															"provider": &schema.Schema{
+																Type:     schema.TypeString,
+																Optional: true,
+															},
+														},
+													},
 												},
 											},
 										},
@@ -332,6 +356,10 @@ func resourceMarathonApp() *schema.Resource {
 										Default:  0,
 										Optional: true,
 									},
+									"port": &schema.Schema{
+										Type:     schema.TypeInt,
+										Optional: true,
+									},
 									"timeout_seconds": &schema.Schema{
 										Type:     schema.TypeInt,
 										Default:  20,
@@ -425,6 +453,14 @@ func resourceMarathonApp() *schema.Resource {
 										Default:  "tcp",
 										Optional: true,
 									},
+									"name": &schema.Schema{
+										Type:     schema.TypeString,
+										Optional: true,
+									},
+									"labels": &schema.Schema{
+										Type:     schema.TypeMap,
+										Optional: true,
+									},
 								},
 							},
 						},
@@ -473,6 +509,11 @@ func resourceMarathonApp() *schema.Resource {
 				Type:     schema.TypeString,
 				Optional: true,
 				Default:  "YOUNGEST_FIRST",
+				ForceNew: false,
+			},
+			"user": &schema.Schema{
+				Type:     schema.TypeString,
+				Optional: true,
 				ForceNew: false,
 			},
 			"uris": &schema.Schema{
@@ -682,6 +723,7 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) {
 					// pmMap["service_port"] = portMapping.ServicePort
 					pmMap["protocol"] = portMapping.Protocol
 					pmMap["labels"] = portMapping.Labels
+					pmMap["name"] = portMapping.Name
 					portMappings[idx] = pmMap
 				}
 				dockerMap["port_mappings"] = []interface{}{map[string]interface{}{"port_mapping": portMappings}}
@@ -698,6 +740,7 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) {
 				volumeMap["container_path"] = volume.ContainerPath
 				volumeMap["host_path"] = volume.HostPath
 				volumeMap["mode"] = volume.Mode
+				volumeMap["external"] = volume.External
 				volumes[idx] = volumeMap
 			}
 			containerMap["volumes"] = []interface{}{map[string]interface{}{"volume": volumes}}
@@ -757,6 +800,7 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) {
 			hMap["max_consecutive_failures"] = healthCheck.MaxConsecutiveFailures
 			hMap["path"] = healthCheck.Path
 			hMap["port_index"] = healthCheck.PortIndex
+			hMap["port"] = healthCheck.Port
 			hMap["protocol"] = healthCheck.Protocol
 			hMap["timeout_seconds"] = healthCheck.TimeoutSeconds
 			healthChecks[idx] = hMap
@@ -794,6 +838,8 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) {
 			hMap := make(map[string]interface{})
 			hMap["port"] = portDefinition.Port
 			hMap["protocol"] = portDefinition.Protocol
+			hMap["name"] = portDefinition.Name
+			hMap["labels"] = portDefinition.Labels
 			portDefinitions[idx] = hMap
 		}
 		d.Set("port_definitions", &[]interface{}{map[string]interface{}{"port_definition": portDefinitions}})
@@ -823,6 +869,9 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) {
 
 	d.Set("kill_selection", app.KillSelection)
 	d.SetPartial("kill_selection")
+
+	d.Set("user", app.User)
+	d.SetPartial("user")
 
 	d.Set("uris", app.Uris)
 	d.SetPartial("uris")
@@ -1029,6 +1078,9 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 					if val, ok := pmMap["service_port"]; ok {
 						portMappings[i].ServicePort = val.(int)
 					}
+					if val, ok := pmMap["name"]; ok {
+						portMappings[i].Name = val.(string)
+					}
 
 					labelsMap := d.Get(fmt.Sprintf("container.0.docker.0.port_mappings.0.port_mapping.%d.labels", i)).(map[string]interface{})
 					labels := make(map[string]string, len(labelsMap))
@@ -1060,6 +1112,28 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 				}
 				if val, ok := volumeMap["mode"]; ok {
 					volumes[i].Mode = val.(string)
+				}
+
+				if volumeMap["external"] != nil {
+					externalMap := d.Get(fmt.Sprintf("container.0.volumes.0.volume.%d.external.0", i)).(map[string]interface{})
+					external := new(marathon.ExternalVolume)
+
+					if val, ok := externalMap["name"]; ok {
+						external.Name = val.(string)
+					}
+					if val, ok := externalMap["provider"]; ok {
+						external.Provider = val.(string)
+					}
+					if val, ok := externalMap["options"]; ok {
+						optionsMap := val.(map[string]interface{})
+						options := make(map[string]string, len(optionsMap))
+
+						for key, value := range optionsMap {
+							options[key] = value.(string)
+						}
+						external.Options = &options
+					}
+					volumes[i].External = external
 				}
 			}
 			container.Volumes = &volumes
@@ -1163,6 +1237,11 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 				}
 			}
 
+			if prop, ok := mapStruct["port"]; ok {
+				prop := prop.(int)
+				healthCheck.Port = &prop
+			}
+
 			if prop, ok := mapStruct["timeout_seconds"]; ok {
 				healthCheck.TimeoutSeconds = prop.(int)
 			}
@@ -1245,6 +1324,17 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 				portDefinition.Protocol = prop.(string)
 			}
 
+			if prop, ok := mapStruct["name"]; ok {
+				portDefinition.Name = prop.(string)
+			}
+
+			labelsMap := d.Get(fmt.Sprintf("port_definitions.0.port_definition.%d.labels", i)).(map[string]interface{})
+			labels := make(map[string]string, len(labelsMap))
+			for key, value := range labelsMap {
+				labels[key] = value.(string)
+			}
+			portDefinition.Labels = &labels
+
 			portDefinitions[i] = *portDefinition
 		}
 
@@ -1291,6 +1381,11 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 	if v, ok := d.GetOk("kill_selection"); ok {
 		v := v.(string)
 		application.KillSelection = v
+	}
+
+	if v, ok := d.GetOk("user"); ok {
+		v := v.(string)
+		application.User = v
 	}
 
 	if v, ok := d.GetOk("uris.#"); ok {

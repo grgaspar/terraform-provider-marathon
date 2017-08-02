@@ -1,5 +1,6 @@
 ## 1.3.0 (unreleased)
 
+- Added support for `container.port_mappings.port_mapping.name`, `port_definitions.port_definition.[name|labels]`, `health_checks.health_check.port`, `volumes.volume.external`
 - Added support for `disk`, `gpus`, `max_launch_delay_seconds` and `port_definitions` configuration
 - Added support for `unreachable_strategy` configuration
 - Added support for `kill_selection` configuration

@@ -32,6 +32,7 @@ resource "marathon_app" "app-create-example" {
           container_port = 161
           host_port = 0
           protocol = "udp"
+          name = "port_161"
         }
       }
     }
@@ -44,8 +45,14 @@ resource "marathon_app" "app-create-example" {
       }
       volume {
         container_path = "/etc/b"
-        host_path = "/var/data/b"
         mode = "RW"
+        external {
+          name = "external-volume"
+          provider = "dvdi"
+          options {
+            "dvdi/driver" = "rexray"
+          }
+        }
       }
     }
   }
