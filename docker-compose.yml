@@ -83,3 +83,4 @@ marathon:
     - MARATHON_DECLINE_OFFER_DURATION=3600000
     - MARATHON_MESOS_AUTHENTICATION_PRINCIPAL=marathon
     - MARATHON_MESOS_ROLE=public
+  command: --enable_features external_volumes
