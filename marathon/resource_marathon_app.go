@@ -230,7 +230,7 @@ func resourceMarathonApp() *schema.Resource {
 													Type:     schema.TypeList,
 													Optional: true,
 													Elem: &schema.Resource{
-														Schema: map[string]*schema.Schema {
+														Schema: map[string]*schema.Schema{
 															"options": &schema.Schema{
 																Type:     schema.TypeMap,
 																Optional: true,
@@ -745,9 +745,8 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) {
 			}
 			containerMap["volumes"] = []interface{}{map[string]interface{}{"volume": volumes}}
 		} else {
-			containerMap["volumes"] = make([]interface{}, 0)
+			containerMap["volumes"] = nil
 		}
-
 		d.Set("container", &[]interface{}{containerMap})
 	}
 	d.SetPartial("container")
@@ -1116,24 +1115,25 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 
 				if volumeMap["external"] != nil {
 					externalMap := d.Get(fmt.Sprintf("container.0.volumes.0.volume.%d.external.0", i)).(map[string]interface{})
-					external := new(marathon.ExternalVolume)
-
-					if val, ok := externalMap["name"]; ok {
-						external.Name = val.(string)
-					}
-					if val, ok := externalMap["provider"]; ok {
-						external.Provider = val.(string)
-					}
-					if val, ok := externalMap["options"]; ok {
-						optionsMap := val.(map[string]interface{})
-						options := make(map[string]string, len(optionsMap))
-
-						for key, value := range optionsMap {
-							options[key] = value.(string)
+					if len(externalMap) > 0 {
+						external := new(marathon.ExternalVolume)
+						if val, ok := externalMap["name"]; ok {
+							external.Name = val.(string)
 						}
-						external.Options = &options
+						if val, ok := externalMap["provider"]; ok {
+							external.Provider = val.(string)
+						}
+						if val, ok := externalMap["options"]; ok {
+							optionsMap := val.(map[string]interface{})
+							options := make(map[string]string, len(optionsMap))
+
+							for key, value := range optionsMap {
+								options[key] = value.(string)
+							}
+							external.Options = &options
+						}
+						volumes[i].External = external
 					}
-					volumes[i].External = external
 				}
 			}
 			container.Volumes = &volumes
