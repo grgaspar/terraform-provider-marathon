@@ -1239,7 +1239,9 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 
 			if prop, ok := mapStruct["port"]; ok {
 				prop := prop.(int)
-				healthCheck.Port = &prop
+				if prop > 0 {
+					healthCheck.Port = &prop
+				}
 			}
 
 			if prop, ok := mapStruct["timeout_seconds"]; ok {
