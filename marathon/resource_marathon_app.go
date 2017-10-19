@@ -738,6 +738,7 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 			containerMap["docker"] = []interface{}{dockerMap}
 
 			dockerMap["image"] = docker.Image
+			log.Println("DOCKERIMAGE: " + docker.Image)
 			dockerMap["force_pull_image"] = *docker.ForcePullImage
 			dockerMap["network"] = docker.Network
 			parameters := make([]map[string]string, len(*docker.Parameters))
@@ -790,8 +791,6 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 			containerMap["volumes"] = nil
 		}
 
-		log.Println("CONTAINER")
-		log.Println(&[]interface{}{containerMap})
 		containerList := make([]interface{}, 1)
 		containerList[0] = containerMap
 		err := d.Set("container", containerList)
