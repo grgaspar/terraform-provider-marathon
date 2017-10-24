@@ -7,19 +7,25 @@ resource "marathon_app" "app-create-example" {
   instances = 1
   mem = 50
   max_launch_delay_seconds = 3000
-  ports = [0, 0]
+
+  networks {
+    network {
+      mode = "container/bridge"
+    }
+  }
 
   container {
     docker {
       image = "python:3"
-      network = "BRIDGE"
       parameters {
         parameter {
           key = "hostname"
           value = "a.corp.org"
         }
       }
-      port_mappings {
+    }
+
+    port_mappings {
         port_mapping {
           container_port = 8080
           host_port = 0
@@ -35,7 +41,6 @@ resource "marathon_app" "app-create-example" {
           name = "port_161"
         }
       }
-    }
 
     volumes {
       volume {

@@ -5,17 +5,24 @@ resource "marathon_app" "ip-address-create-example" {
   instances = 1
   mem = 50
 
+  networks {
+    network {
+      mode = "container/bridge"
+    }
+  }
+
   container {
     docker {
       image = "python:3"
-      network = "BRIDGE"
       parameters {
         parameter {
           key = "hostname"
           value = "a.corp.org"
         }
       }
-      port_mappings {
+    }
+
+    port_mappings {
         port_mapping {
           container_port = 8080
           host_port = 0
@@ -30,7 +37,6 @@ resource "marathon_app" "ip-address-create-example" {
           protocol = "udp"
         }
       }
-    }
 
     volumes {
       volume {
@@ -59,10 +65,6 @@ resource "marathon_app" "ip-address-create-example" {
        max_consecutive_failures = 0
        protocol = "COMMAND"
      }
-  }
-
-  ipaddress {
-    network_name = "default"
   }
 
   kill_selection = "OLDEST_FIRST"

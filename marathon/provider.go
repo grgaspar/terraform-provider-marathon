@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gambol99/go-marathon"
+	"github.com/ContainerLabs/go-marathon"
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/hashicorp/terraform/terraform"
 )
@@ -81,9 +81,7 @@ func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 	}
 	marathonConfig.EventsTransport = marathon.EventsTransportSSE
 
-	marathonConfig.HTTPClient = &http.Client{
-		Timeout: (time.Duration(d.Get("deployment_timeout").(int)) * time.Second),
-	}
+	marathonConfig.HTTPSSEClient = &http.Client{}
 
 	config := config{
 		config: marathonConfig,
