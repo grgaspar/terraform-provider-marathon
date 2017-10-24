@@ -716,6 +716,25 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 	}
 	d.SetPartial("constraints")
 
+	if app.Networks != nil && len(*app.Networks) > 0 {
+		nMaps := make([]map[string]string, len(*app.Networks))
+		for idx, network := range *app.Networks {
+			nMap := make(map[string]string)
+			nMap["name"] = network.Name
+			nMap["mode"] = network.Mode
+			nMaps[idx] = nMap
+		}
+		networks := []interface{}{map[string]interface{}{"network": nMaps}}
+		err := d.Set("networks", networks)
+
+		if err != nil {
+			return errors.New("Failed to set networks: " + err.Error())
+		}
+	} else {
+		d.Set("networks", nil)
+	}
+	d.SetPartial("networks")
+
 	if app.Container != nil {
 		container := app.Container
 
@@ -934,7 +953,7 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 			}
 			hMap["protocol"] = portDefinition.Protocol
 			hMap["name"] = portDefinition.Name
-			hMap["labels"] = *portDefinition.Labels
+			hMap["labels"] = portDefinition.Labels
 			portDefinitions[idx] = hMap
 		}
 		err := d.Set("port_definitions", &[]interface{}{map[string]interface{}{"port_definition": portDefinitions}})
@@ -1114,24 +1133,24 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 		application.Constraints = nil
 	}
 
-	// if v, ok := d.GetOk("networks.0.network.#"); ok {
-	// 	networks := make([]marathon.Network, v.(int))
+	if v, ok := d.GetOk("networks.0.network.#"); ok {
+		networks := make([]marathon.Network, v.(int))
 
-	// 	for i := range networks {
-	// 		network := new(marathon.Network)
-	// 		networks[i] = *network
+		for i := range networks {
+			network := new(marathon.Network)
+			networks[i] = *network
 
-	// 		netMap := d.Get(fmt.Sprintf("networks.0.network.%d", i)).(map[string]interface{})
+			netMap := d.Get(fmt.Sprintf("networks.0.network.%d", i)).(map[string]interface{})
 
-	// 		if val, ok := netMap["mode"]; ok {
-	// 			networks[i].Mode = val.(string)
-	// 		}
-	// 		if val, ok := netMap["name"]; ok {
-	// 			networks[i].Name = val.(string)
-	// 		}
-	// 	}
-	// 	application.Networks = &networks
-	// }
+			if val, ok := netMap["mode"]; ok {
+				networks[i].Mode = val.(string)
+			}
+			if val, ok := netMap["name"]; ok {
+				networks[i].Name = val.(string)
+			}
+		}
+		application.Networks = &networks
+	}
 
 	if v, ok := d.GetOk("container.0.type"); ok {
 		container := new(marathon.Container)
