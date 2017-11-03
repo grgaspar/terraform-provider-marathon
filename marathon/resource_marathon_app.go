@@ -18,6 +18,10 @@ func resourceMarathonApp() *schema.Resource {
 		Update: resourceMarathonAppUpdate,
 		Delete: resourceMarathonAppDelete,
 
+		Importer: &schema.ResourceImporter{
+			State: schema.ImportStatePassthrough,
+		},
+
 		Schema: map[string]*schema.Schema{
 			"accepted_resource_roles": &schema.Schema{
 				Type:     schema.TypeList,
@@ -788,7 +792,13 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 				volumeMap["host_path"] = volume.HostPath
 				volumeMap["mode"] = volume.Mode
 				if volume.External != nil {
-					volumeMap["external"] = volume.External
+					externalMap := make(map[string]interface{})
+					externalMap["name"] = volume.External.Name
+					externalMap["provider"] = volume.External.Provider
+					externalMap["options"] = *volume.External.Options
+					externalList := make([]interface{}, 1)
+					externalList[0] = externalMap
+					volumeMap["external"] = externalList
 				}
 				volumes[idx] = volumeMap
 			}
@@ -953,7 +963,8 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 			}
 			hMap["protocol"] = portDefinition.Protocol
 			hMap["name"] = portDefinition.Name
-			hMap["labels"] = portDefinition.Labels
+			// TODO: @kamsz Fix labels - must be a map
+			// hMap["labels"] = portDefinition.Labels
 			portDefinitions[idx] = hMap
 		}
 		err := d.Set("port_definitions", &[]interface{}{map[string]interface{}{"port_definition": portDefinitions}})
@@ -1483,18 +1494,30 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 
 	upgradeStrategy := marathon.UpgradeStrategy{}
 
-	if v, ok := d.GetOk("upgrade_strategy.0.minimum_health_capacity"); ok {
-		f, ok := v.(float64)
-		if ok {
-			upgradeStrategy.MinimumHealthCapacity = &f
-		}
+	// if v, ok := d.GetOk("upgrade_strategy.0.minimum_health_capacity"); ok {
+	// 	f, ok := v.(float64)
+	// 	if ok {
+	// 		upgradeStrategy.MinimumHealthCapacity = &f
+	// 	}
+	// }
+
+	v := d.Get("upgrade_strategy.0.minimum_health_capacity")
+	f, ok := v.(float64)
+	if ok {
+		upgradeStrategy.MinimumHealthCapacity = &f
 	}
 
-	if v, ok := d.GetOk("upgrade_strategy.0.maximum_over_capacity"); ok {
-		f, ok := v.(float64)
-		if ok {
-			upgradeStrategy.MaximumOverCapacity = &f
-		}
+	// if v, ok := d.GetOk("upgrade_strategy.0.maximum_over_capacity"); ok {
+	// 	f, ok := v.(float64)
+	// 	if ok {
+	// 		upgradeStrategy.MaximumOverCapacity = &f
+	// 	}
+	// }
+
+	v = d.Get("upgrade_strategy.0.maximum_over_capacity")
+	f, ok = v.(float64)
+	if ok {
+		upgradeStrategy.MaximumOverCapacity = &f
 	}
 
 	application.SetUpgradeStrategy(upgradeStrategy)
