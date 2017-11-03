@@ -358,7 +358,7 @@ func resourceMarathonApp() *schema.Resource {
 									},
 									"path": &schema.Schema{
 										Type:     schema.TypeString,
-										Default:  "/",
+										Default:  "",
 										Optional: true,
 									},
 									"grace_period_seconds": &schema.Schema{
