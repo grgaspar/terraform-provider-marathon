@@ -138,12 +138,10 @@ func resourceMarathonApp() *schema.Resource {
 														Schema: map[string]*schema.Schema{
 															"key": &schema.Schema{
 																Type:     schema.TypeString,
-																Default:  "tcp",
 																Optional: true,
 															},
 															"value": &schema.Schema{
 																Type:     schema.TypeString,
-																Default:  "tcp",
 																Optional: true,
 															},
 														},
@@ -450,7 +448,6 @@ func resourceMarathonApp() *schema.Resource {
 									},
 									"port": &schema.Schema{
 										Type:     schema.TypeInt,
-										Default:  "tcp",
 										Optional: true,
 									},
 									"name": &schema.Schema{
@@ -523,6 +520,10 @@ func resourceMarathonApp() *schema.Resource {
 				Elem: &schema.Schema{
 					Type: schema.TypeString,
 				},
+			},
+			"executor": &schema.Schema{
+				Type:     schema.TypeString,
+				Computed: true,
 			},
 			"version": &schema.Schema{
 				Type:     schema.TypeString,
@@ -638,30 +639,57 @@ func resourceMarathonAppRead(d *schema.ResourceData, meta interface{}) error {
 	}
 
 	if app != nil {
-		setSchemaFieldsForApp(app, d)
+		appErr := setSchemaFieldsForApp(app, d)
+		if appErr != nil {
+			return appErr
+		}
 	}
 
 	return nil
 }
 
-func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) {
+func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) error {
 
-	d.Set("app_id", app.ID)
+	err := d.Set("app_id", app.ID)
+	if err != nil {
+		return errors.New("Failed to set app_id: " + err.Error())
+	}
+
 	d.SetPartial("app_id")
 
-	d.Set("accepted_resource_roles", &app.AcceptedResourceRoles)
+	err = d.Set("accepted_resource_roles", &app.AcceptedResourceRoles)
+	if err != nil {
+		return errors.New("Failed to set accepted_resource_roles: " + err.Error())
+	}
+
 	d.SetPartial("accepted_resource_roles")
 
-	d.Set("args", app.Args)
+	err = d.Set("args", app.Args)
+	if err != nil {
+		return errors.New("Failed to set args: " + err.Error())
+	}
+
 	d.SetPartial("args")
 
-	d.Set("backoff_seconds", app.BackoffSeconds)
+	err = d.Set("backoff_seconds", app.BackoffSeconds)
+	if err != nil {
+		return errors.New("Failed to set backoff_seconds: " + err.Error())
+	}
+
 	d.SetPartial("backoff_seconds")
 
-	d.Set("backoff_factor", app.BackoffFactor)
+	err = d.Set("backoff_factor", app.BackoffFactor)
+	if err != nil {
+		return errors.New("Failed to set backoff_factor: " + err.Error())
+	}
+
 	d.SetPartial("backoff_factor")
 
-	d.Set("cmd", app.Cmd)
+	err = d.Set("cmd", app.Cmd)
+	if err != nil {
+		return errors.New("Failed to set cmd: " + err.Error())
+	}
+
 	d.SetPartial("cmd")
 
 	if app.Constraints != nil && len(*app.Constraints) > 0 {
@@ -676,7 +704,11 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) {
 			cMaps[idx] = cMap
 		}
 		constraints := []interface{}{map[string]interface{}{"constraint": cMaps}}
-		d.Set("constraints", constraints)
+		err := d.Set("constraints", constraints)
+
+		if err != nil {
+			return errors.New("Failed to set contraints: " + err.Error())
+		}
 	} else {
 		d.Set("constraints", nil)
 	}
@@ -687,7 +719,11 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) {
 
 		ipAddressMap := make(map[string]interface{})
 		ipAddressMap["network_name"] = ipAddress.NetworkName
-		d.Set("ipaddress", &[]interface{}{ipAddressMap})
+		err := d.Set("ipaddress", &[]interface{}{ipAddressMap})
+
+		if err != nil {
+			return errors.New("Failed to set ip address per task: " + err.Error())
+		}
 	}
 
 	if app.Container != nil {
@@ -702,7 +738,8 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) {
 			containerMap["docker"] = []interface{}{dockerMap}
 
 			dockerMap["image"] = docker.Image
-			dockerMap["force_pull_image"] = docker.ForcePullImage
+			log.Println("DOCKERIMAGE: " + docker.Image)
+			dockerMap["force_pull_image"] = *docker.ForcePullImage
 			dockerMap["network"] = docker.Network
 			parameters := make([]map[string]string, len(*docker.Parameters))
 			for idx, p := range *docker.Parameters {
@@ -711,8 +748,8 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) {
 				parameter["value"] = p.Value
 				parameters[idx] = parameter
 			}
-			dockerMap["parameters"] = parameters
-			dockerMap["privileged"] = docker.Privileged
+			dockerMap["parameters"] = []interface{}{map[string]interface{}{"parameter": parameters}}
+			dockerMap["privileged"] = *docker.Privileged
 
 			if docker.PortMappings != nil && len(*docker.PortMappings) > 0 {
 				portMappings := make([]map[string]interface{}, len(*docker.PortMappings))
@@ -722,7 +759,11 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) {
 					pmMap["host_port"] = portMapping.HostPort
 					// pmMap["service_port"] = portMapping.ServicePort
 					pmMap["protocol"] = portMapping.Protocol
-					pmMap["labels"] = portMapping.Labels
+					labels := make(map[string]string, len(*portMapping.Labels))
+					for k, v := range *portMapping.Labels {
+						labels[k] = v
+					}
+					pmMap["labels"] = labels
 					pmMap["name"] = portMapping.Name
 					portMappings[idx] = pmMap
 				}
@@ -740,34 +781,67 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) {
 				volumeMap["container_path"] = volume.ContainerPath
 				volumeMap["host_path"] = volume.HostPath
 				volumeMap["mode"] = volume.Mode
-				volumeMap["external"] = volume.External
+				if volume.External != nil {
+					volumeMap["external"] = volume.External
+				}
 				volumes[idx] = volumeMap
 			}
 			containerMap["volumes"] = []interface{}{map[string]interface{}{"volume": volumes}}
 		} else {
 			containerMap["volumes"] = nil
 		}
-		d.Set("container", &[]interface{}{containerMap})
+
+		containerList := make([]interface{}, 1)
+		containerList[0] = containerMap
+		err := d.Set("container", containerList)
+
+		if err != nil {
+			return errors.New("Failed to set container: " + err.Error())
+		}
 	}
 	d.SetPartial("container")
 
-	d.Set("cpus", app.CPUs)
+	err = d.Set("cpus", app.CPUs)
+	if err != nil {
+		return errors.New("Failed to set cpus: " + err.Error())
+	}
+
 	d.SetPartial("cpus")
 
-	d.Set("gpus", app.GPUs)
+	err = d.Set("gpus", app.GPUs)
+	if err != nil {
+		return errors.New("Failed to set gpus: " + err.Error())
+	}
+
 	d.SetPartial("gpus")
 
-	d.Set("disk", app.Disk)
+	err = d.Set("disk", app.Disk)
+	if err != nil {
+		return errors.New("Failed to set disk: " + err.Error())
+	}
+
 	d.SetPartial("disk")
 
-	d.Set("dependencies", &app.Dependencies)
+	err = d.Set("dependencies", &app.Dependencies)
+	if err != nil {
+		return errors.New("Failed to set dependencies: " + err.Error())
+	}
+
 	d.SetPartial("dependencies")
 
-	d.Set("env", app.Env)
+	err = d.Set("env", app.Env)
+	if err != nil {
+		return errors.New("Failed to set env: " + err.Error())
+	}
+
 	d.SetPartial("env")
 
-	d.Set("fetch", app.Fetch)
-	d.SetPartial("fetch")
+	// err = d.Set("fetch", app.Fetch)
+	// if err != nil {
+	// 	return errors.New("Failed to set fetch: " + err.Error())
+	// }
+
+	// d.SetPartial("fetch")
 
 	if app.Fetch != nil && len(*app.Fetch) > 0 {
 		fetches := make([]map[string]interface{}, len(*app.Fetch))
@@ -779,7 +853,11 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) {
 				"extract":    fetch.Extract,
 			}
 		}
-		d.Set("fetch", &[]interface{}{fetches})
+		err := d.Set("fetch", fetches)
+
+		if err != nil {
+			return errors.New("Failed to set fetch: " + err.Error())
+		}
 	} else {
 		d.Set("fetch", nil)
 	}
@@ -794,63 +872,111 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) {
 				hMap["command"] = []interface{}{map[string]string{"value": healthCheck.Command.Value}}
 			}
 			hMap["grace_period_seconds"] = healthCheck.GracePeriodSeconds
-			hMap["ignore_http_1xx"] = healthCheck.IgnoreHTTP1xx
+			if healthCheck.IgnoreHTTP1xx != nil {
+				hMap["ignore_http_1xx"] = *healthCheck.IgnoreHTTP1xx
+			}
 			hMap["interval_seconds"] = healthCheck.IntervalSeconds
-			hMap["max_consecutive_failures"] = healthCheck.MaxConsecutiveFailures
-			hMap["path"] = healthCheck.Path
-			hMap["port_index"] = healthCheck.PortIndex
-			hMap["port"] = healthCheck.Port
+			if healthCheck.MaxConsecutiveFailures != nil {
+				hMap["max_consecutive_failures"] = *healthCheck.MaxConsecutiveFailures
+			}
+			if healthCheck.Path != nil {
+				hMap["path"] = *healthCheck.Path
+			}
+			if healthCheck.PortIndex != nil {
+				hMap["port_index"] = *healthCheck.PortIndex
+			}
+			if healthCheck.Port != nil {
+				hMap["port"] = *healthCheck.Port
+			}
 			hMap["protocol"] = healthCheck.Protocol
 			hMap["timeout_seconds"] = healthCheck.TimeoutSeconds
 			healthChecks[idx] = hMap
 		}
-		d.Set("health_checks", &[]interface{}{map[string]interface{}{"health_check": healthChecks}})
+		err := d.Set("health_checks", &[]interface{}{map[string]interface{}{"health_check": healthChecks}})
+
+		if err != nil {
+			return errors.New("Failed to set health_checks: " + err.Error())
+		}
 	} else {
 		d.Set("health_checks", nil)
 	}
 
 	d.SetPartial("health_checks")
 
-	d.Set("instances", app.Instances)
+	err = d.Set("instances", app.Instances)
+	if err != nil {
+		return errors.New("Failed to set instances: " + err.Error())
+	}
+
 	d.SetPartial("instances")
 
-	d.Set("labels", app.Labels)
+	err = d.Set("labels", app.Labels)
+	if err != nil {
+		return errors.New("Failed to set labels: " + err.Error())
+	}
+
 	d.SetPartial("labels")
 
-	d.Set("mem", app.Mem)
+	err = d.Set("mem", app.Mem)
+	if err != nil {
+		return errors.New("Failed to set mem: " + err.Error())
+	}
+
 	d.SetPartial("mem")
 
-	d.Set("max_launch_delay_seconds", app.MaxLaunchDelaySeconds)
+	err = d.Set("max_launch_delay_seconds", app.MaxLaunchDelaySeconds)
+	if err != nil {
+		return errors.New("Failed to set max_launch_delay_seconds: " + err.Error())
+	}
+
 	d.SetPartial("max_launch_delay_seconds")
 
 	if givenFreePortsDoesNotEqualAllocated(d, app) {
-		d.Set("ports", app.Ports)
+		err := d.Set("ports", app.Ports)
+
+		if err != nil {
+			return errors.New("Failed to set ports: " + err.Error())
+		}
 	}
 	d.SetPartial("ports")
 
-	d.Set("require_ports", app.RequirePorts)
+	err = d.Set("require_ports", app.RequirePorts)
+	if err != nil {
+		return errors.New("Failed to set require_ports: " + err.Error())
+	}
+
 	d.SetPartial("require_ports")
 
 	if app.PortDefinitions != nil && len(*app.PortDefinitions) > 0 {
 		portDefinitions := make([]map[string]interface{}, len(*app.PortDefinitions))
 		for idx, portDefinition := range *app.PortDefinitions {
 			hMap := make(map[string]interface{})
-			hMap["port"] = portDefinition.Port
+			if portDefinition.Port != nil {
+				hMap["port"] = *portDefinition.Port
+			}
 			hMap["protocol"] = portDefinition.Protocol
 			hMap["name"] = portDefinition.Name
-			hMap["labels"] = portDefinition.Labels
+			hMap["labels"] = *portDefinition.Labels
 			portDefinitions[idx] = hMap
 		}
-		d.Set("port_definitions", &[]interface{}{map[string]interface{}{"port_definition": portDefinitions}})
+		err := d.Set("port_definitions", &[]interface{}{map[string]interface{}{"port_definition": portDefinitions}})
+
+		if err != nil {
+			return errors.New("Failed to set port_definitions: " + err.Error())
+		}
 	} else {
 		d.Set("port_definitions", nil)
 	}
 
 	if app.UpgradeStrategy != nil {
 		usMap := make(map[string]interface{})
-		usMap["minimum_health_capacity"] = app.UpgradeStrategy.MinimumHealthCapacity
-		usMap["maximum_over_capacity"] = app.UpgradeStrategy.MaximumOverCapacity
-		d.Set("upgrade_strategy", &[]interface{}{usMap})
+		usMap["minimum_health_capacity"] = *app.UpgradeStrategy.MinimumHealthCapacity
+		usMap["maximum_over_capacity"] = *app.UpgradeStrategy.MaximumOverCapacity
+		err := d.Set("upgrade_strategy", &[]interface{}{usMap})
+
+		if err != nil {
+			return errors.New("Failed to set upgrade_strategy: " + err.Error())
+		}
 	} else {
 		d.Set("upgrade_strategy", nil)
 	}
@@ -858,33 +984,49 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) {
 
 	if app.UnreachableStrategy != nil {
 		unrMap := make(map[string]interface{})
-		unrMap["inactive_after_seconds"] = app.UnreachableStrategy.InactiveAfterSeconds
-		unrMap["expunge_after_seconds"] = app.UnreachableStrategy.ExpungeAfterSeconds
-		d.Set("unreachable_strategy", &[]interface{}{unrMap})
+		unrMap["inactive_after_seconds"] = *app.UnreachableStrategy.InactiveAfterSeconds
+		unrMap["expunge_after_seconds"] = *app.UnreachableStrategy.ExpungeAfterSeconds
+		err := d.Set("unreachable_strategy", &[]interface{}{unrMap})
+
+		if err != nil {
+			return errors.New("Failed to set unreachable_strategy: " + err.Error())
+		}
 	} else {
 		d.Set("unreachable_strategy", nil)
 	}
 	d.SetPartial("unreachable_strategy")
 
-	d.Set("kill_selection", app.KillSelection)
+	err = d.Set("kill_selection", app.KillSelection)
+	if err != nil {
+		return errors.New("Failed to set kill_selection: " + err.Error())
+	}
 	d.SetPartial("kill_selection")
 
-	d.Set("user", app.User)
+	err = d.Set("user", app.User)
+	if err != nil {
+		return errors.New("Failed to set user: " + err.Error())
+	}
 	d.SetPartial("user")
 
-	d.Set("uris", app.Uris)
+	err = d.Set("uris", app.Uris)
+	if err != nil {
+		return errors.New("Failed to set uris: " + err.Error())
+	}
 	d.SetPartial("uris")
 
-	// App
-	d.Set("executor", app.Executor)
+	err = d.Set("executor", *app.Executor)
+	if err != nil {
+		return errors.New("Failed to set executor: " + err.Error())
+	}
 	d.SetPartial("executor")
 
-	d.Set("user", app.User)
-	d.SetPartial("user")
-
-	d.Set("version", app.Version)
+	err = d.Set("version", app.Version)
+	if err != nil {
+		return errors.New("Failed to set version: " + err.Error())
+	}
 	d.SetPartial("version")
 
+	return nil
 }
 
 func givenFreePortsDoesNotEqualAllocated(d *schema.ResourceData, app *marathon.Application) bool {
