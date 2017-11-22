@@ -1,5 +1,5 @@
 /*
-Copyright 2014 Rohith All rights reserved.
+Copyright 2014 The go-marathon Authors All rights reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -56,15 +56,16 @@ type Port struct {
 
 // Application is the definition for an application in marathon
 type Application struct {
-	ID                         string              `json:"id,omitempty"`
-	Cmd                        *string             `json:"cmd,omitempty"`
-	Args                       *[]string           `json:"args,omitempty"`
-	Constraints                *[][]string         `json:"constraints,omitempty"`
-	Container                  *Container          `json:"container,omitempty"`
-	CPUs                       float64             `json:"cpus,omitempty"`
-	GPUs                       *float64            `json:"gpus,omitempty"`
-	Disk                       *float64            `json:"disk,omitempty"`
-	Env                        *map[string]string  `json:"env,omitempty"`
+	ID          string      `json:"id,omitempty"`
+	Cmd         *string     `json:"cmd,omitempty"`
+	Args        *[]string   `json:"args,omitempty"`
+	Constraints *[][]string `json:"constraints,omitempty"`
+	Container   *Container  `json:"container,omitempty"`
+	CPUs        float64     `json:"cpus,omitempty"`
+	GPUs        *float64    `json:"gpus,omitempty"`
+	Disk        *float64    `json:"disk,omitempty"`
+	// Contains non-secret environment variables. Secrets environment variables are part of the Secrets map.
+	Env                        *map[string]string  `json:"-"`
 	Executor                   *string             `json:"executor,omitempty"`
 	HealthChecks               *[]HealthCheck      `json:"healthChecks,omitempty"`
 	ReadinessChecks            *[]ReadinessCheck   `json:"readinessChecks,omitempty"`
@@ -99,6 +100,8 @@ type Application struct {
 	LastTaskFailure       *LastTaskFailure        `json:"lastTaskFailure,omitempty"`
 	Fetch                 *[]Fetch                `json:"fetch,omitempty"`
 	IPAddressPerTask      *IPAddressPerTask       `json:"ipAddress,omitempty"`
+	Residency             *Residency              `json:"residency,omitempty"`
+	Secrets               *map[string]Secret      `json:"-"`
 }
 
 // ApplicationVersions is a collection of application versions for a specific app in marathon
@@ -147,6 +150,14 @@ type TaskStats struct {
 type Stats struct {
 	Counts   map[string]int     `json:"counts"`
 	LifeTime map[string]float64 `json:"lifeTime"`
+}
+
+// Secret is the environment variable and secret store path associated with a secret.
+// The value for EnvVar is populated from the env field, and Source is populated from
+// the secrets field of the application json.
+type Secret struct {
+	EnvVar string
+	Source string
 }
 
 // SetIPAddressPerTask defines that the application will have a IP address defines by a external agent.
@@ -355,8 +366,8 @@ func (r *Application) EmptyLabels() *Application {
 }
 
 // AddEnv adds an environment variable to the application
-//		name:	the name of the variable
-//		value:	go figure, the value associated to the above
+// name:	the name of the variable
+// value:	go figure, the value associated to the above
 func (r *Application) AddEnv(name, value string) *Application {
 	if r.Env == nil {
 		r.EmptyEnvs()
@@ -371,6 +382,28 @@ func (r *Application) AddEnv(name, value string) *Application {
 // keep the current value)
 func (r *Application) EmptyEnvs() *Application {
 	r.Env = &map[string]string{}
+
+	return r
+}
+
+// AddSecret adds a secret declaration
+// envVar: the name of the environment variable
+// name:	the name of the secret
+// source:	the source ID of the secret
+func (r *Application) AddSecret(envVar, name, source string) *Application {
+	if r.Secrets == nil {
+		r.EmptySecrets()
+	}
+	(*r.Secrets)[name] = Secret{EnvVar: envVar, Source: source}
+
+	return r
+}
+
+// EmptySecrets explicitly empties the secrets -- use this if you need to empty
+// the secrets of an application that already has secrets set (setting secrets to nil will
+// keep the current value)
+func (r *Application) EmptySecrets() *Application {
+	r.Secrets = &map[string]Secret{}
 
 	return r
 }
@@ -455,7 +488,7 @@ func (r *Application) DeploymentIDs() []*DeploymentID {
 // CheckHTTP adds a HTTP check to an application
 //		port: 		the port the check should be checking
 // 		interval:	the interval in seconds the check should be performed
-func (r *Application) CheckHTTP(uri string, port, interval int) (*Application, error) {
+func (r *Application) CheckHTTP(path string, port, interval int) (*Application, error) {
 	if r.Container == nil || r.Container.Docker == nil {
 		return nil, ErrNoApplicationContainer
 	}
@@ -466,7 +499,7 @@ func (r *Application) CheckHTTP(uri string, port, interval int) (*Application, e
 	}
 	health := NewDefaultHealthCheck()
 	health.IntervalSeconds = interval
-	*health.Path = uri
+	*health.Path = path
 	*health.PortIndex = portIndex
 	// step: add to the checks
 	r.AddHealthCheck(*health)
@@ -571,6 +604,23 @@ func (r *Application) EmptyUnreachableStrategy() *Application {
 	return r
 }
 
+// SetResidency sets behavior for resident applications, an application is resident when
+// it has local persistent volumes set
+func (r *Application) SetResidency(whenLost TaskLostBehaviorType) *Application {
+	r.Residency = &Residency{
+		TaskLostBehavior: whenLost,
+	}
+	return r
+}
+
+// EmptyResidency explicitly empties the residency -- use this if
+// you need to empty the residency of an application that already has
+// the residency set (setting it to nil will keep the current value).
+func (r *Application) EmptyResidency() *Application {
+	r.Residency = &Residency{}
+	return r
+}
+
 // String returns the json representation of this application
 func (r *Application) String() string {
 	s, err := json.MarshalIndent(r, "", "  ")
@@ -627,9 +677,9 @@ func (r *marathonClient) HasApplicationVersion(name, version string) (bool, erro
 // ApplicationVersions is a list of versions which has been deployed with marathon for a specific application
 //		name:		the id used to identify the application
 func (r *marathonClient) ApplicationVersions(name string) (*ApplicationVersions, error) {
-	uri := fmt.Sprintf("%s/versions", buildURI(name))
+	path := fmt.Sprintf("%s/versions", buildPath(name))
 	versions := new(ApplicationVersions)
-	if err := r.apiGet(uri, nil, versions); err != nil {
+	if err := r.apiGet(path, nil, versions); err != nil {
 		return nil, err
 	}
 	return versions, nil
@@ -639,9 +689,9 @@ func (r *marathonClient) ApplicationVersions(name string) (*ApplicationVersions,
 // 		name: 		the id used to identify the application
 //		version: 	the version (normally a timestamp) you wish to change to
 func (r *marathonClient) SetApplicationVersion(name string, version *ApplicationVersion) (*DeploymentID, error) {
-	uri := fmt.Sprintf(buildURI(name))
+	path := fmt.Sprintf(buildPath(name))
 	deploymentID := new(DeploymentID)
-	if err := r.apiPut(uri, version, deploymentID); err != nil {
+	if err := r.apiPut(path, version, deploymentID); err != nil {
 		return nil, err
 	}
 
@@ -655,7 +705,7 @@ func (r *marathonClient) Application(name string) (*Application, error) {
 		Application *Application `json:"app"`
 	}
 
-	if err := r.apiGet(buildURI(name), nil, &wrapper); err != nil {
+	if err := r.apiGet(buildPath(name), nil, &wrapper); err != nil {
 		return nil, err
 	}
 
@@ -666,7 +716,7 @@ func (r *marathonClient) Application(name string) (*Application, error) {
 // 		name: 		the id used to identify the application
 //		opts:		GetAppOpts request payload
 func (r *marathonClient) ApplicationBy(name string, opts *GetAppOpts) (*Application, error) {
-	u, err := addOptions(buildURI(name), opts)
+	path, err := addOptions(buildPath(name), opts)
 	if err != nil {
 		return nil, err
 	}
@@ -674,7 +724,7 @@ func (r *marathonClient) ApplicationBy(name string, opts *GetAppOpts) (*Applicat
 		Application *Application `json:"app"`
 	}
 
-	if err := r.apiGet(u, nil, &wrapper); err != nil {
+	if err := r.apiGet(path, nil, &wrapper); err != nil {
 		return nil, err
 	}
 
@@ -687,8 +737,8 @@ func (r *marathonClient) ApplicationBy(name string, opts *GetAppOpts) (*Applicat
 func (r *marathonClient) ApplicationByVersion(name, version string) (*Application, error) {
 	app := new(Application)
 
-	uri := fmt.Sprintf("%s/versions/%s", buildURI(name), version)
-	if err := r.apiGet(uri, nil, app); err != nil {
+	path := fmt.Sprintf("%s/versions/%s", buildPath(name), version)
+	if err := r.apiGet(path, nil, app); err != nil {
 		return nil, err
 	}
 
@@ -795,10 +845,10 @@ func (r *marathonClient) appExistAndRunning(name string) bool {
 // 		name: 		the id used to identify the application
 //		force:		used to force the delete operation in case of blocked deployment
 func (r *marathonClient) DeleteApplication(name string, force bool) (*DeploymentID, error) {
-	uri := buildURIWithForceParam(name, force)
+	path := buildPathWithForceParam(name, force)
 	// step: check of the application already exists
 	deployID := new(DeploymentID)
-	if err := r.apiDelete(uri, nil, deployID); err != nil {
+	if err := r.apiDelete(path, nil, deployID); err != nil {
 		return nil, err
 	}
 
@@ -810,8 +860,8 @@ func (r *marathonClient) DeleteApplication(name string, force bool) (*Deployment
 func (r *marathonClient) RestartApplication(name string, force bool) (*DeploymentID, error) {
 	deployment := new(DeploymentID)
 	var options struct{}
-	uri := buildURIWithForceParam(fmt.Sprintf("%s/restart", name), force)
-	if err := r.apiPost(uri, &options, deployment); err != nil {
+	path := buildPathWithForceParam(fmt.Sprintf("%s/restart", name), force)
+	if err := r.apiPost(path, &options, deployment); err != nil {
 		return nil, err
 	}
 
@@ -826,9 +876,9 @@ func (r *marathonClient) ScaleApplicationInstances(name string, instances int, f
 	changes := new(Application)
 	changes.ID = validateID(name)
 	changes.Instances = &instances
-	uri := buildURIWithForceParam(name, force)
+	path := buildPathWithForceParam(name, force)
 	deployID := new(DeploymentID)
-	if err := r.apiPut(uri, changes, deployID); err != nil {
+	if err := r.apiPut(path, changes, deployID); err != nil {
 		return nil, err
 	}
 
@@ -839,22 +889,22 @@ func (r *marathonClient) ScaleApplicationInstances(name string, instances int, f
 // 		application:		the structure holding the application configuration
 func (r *marathonClient) UpdateApplication(application *Application, force bool) (*DeploymentID, error) {
 	result := new(DeploymentID)
-	uri := buildURIWithForceParam(application.ID, force)
-	if err := r.apiPut(uri, application, result); err != nil {
+	path := buildPathWithForceParam(application.ID, force)
+	if err := r.apiPut(path, application, result); err != nil {
 		return nil, err
 	}
 	return result, nil
 }
 
-func buildURIWithForceParam(path string, force bool) string {
-	uri := buildURI(path)
+func buildPathWithForceParam(rootPath string, force bool) string {
+	path := buildPath(rootPath)
 	if force {
-		uri += "?force=true"
+		path += "?force=true"
 	}
-	return uri
+	return path
 }
 
-func buildURI(path string) string {
+func buildPath(path string) string {
 	return fmt.Sprintf("%s/%s", marathonAPIApps, trimRootPath(path))
 }
 

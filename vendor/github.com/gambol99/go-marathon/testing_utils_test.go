@@ -1,5 +1,5 @@
 /*
-Copyright 2014 Rohith All rights reserved.
+Copyright 2014 The go-marathon Authors All rights reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -264,12 +264,11 @@ func initFakeMarathonResponses(t *testing.T) {
 		// step: read in the test method specification
 		methodSpec, err := ioutil.ReadFile("./tests/rest-api/methods.yml")
 		if err != nil {
-			t.Fatalf("failed to read in the fake yaml responses")
+			t.Fatalf("failed to read in the fake yaml responses: %s", err)
 		}
 
-		err = yaml.Unmarshal([]byte(methodSpec), &methods)
-		if err != nil {
-			t.Fatalf("failed to unmarshal the response")
+		if err = yaml.Unmarshal([]byte(methodSpec), &methods); err != nil {
+			t.Fatalf("failed to unmarshal the response: %s", err)
 		}
 		for _, method := range methods {
 			key := fakeResponseMapKey(method.Method, method.URI, method.Scope)
@@ -314,12 +313,11 @@ func (s *fakeServer) PublishEvent(event string) {
 	s.eventSrv.Publish([]string{"event"}, fakeEvent{event})
 }
 
-func (s *fakeServer) Close() error {
+func (s *fakeServer) Close() {
 	s.eventSrv.Close()
 	s.httpSrv.Close()
-	return nil
 }
 
-func (e *endpoint) Close() error {
-	return e.Server.Close()
+func (e *endpoint) Close() {
+	e.Server.Close()
 }

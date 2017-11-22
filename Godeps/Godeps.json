@@ -145,12 +145,12 @@
 		},
 		{
 			"ImportPath": "github.com/donovanhide/eventsource",
-			"Rev": "fd1de70867126402be23c306e1ce32828455d85b"
+			"Rev": "3ed64d21fb0b6bd8b49bcfec08f3004daee8723d"
 		},
 		{
 			"ImportPath": "github.com/gambol99/go-marathon",
-			"Comment": "v0.7.1-4-gcf63187",
-			"Rev": "cf631873b8c2d4cd3a348a65129951bfc00d9b82"
+			"Comment": "v0.7.2 - unreleased",
+			"Rev": "ec4a50170df729be7380d2797177dea832f41013"
 		},
 		{
 			"ImportPath": "github.com/go-ini/ini",
