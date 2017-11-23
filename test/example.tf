@@ -32,7 +32,7 @@ resource "marathon_app" "app-create-example" {
           container_port = 161
           host_port = 0
           protocol = "udp"
-          name = "port_161"
+          name = "port161"
         }
       }
     }
@@ -42,6 +42,9 @@ resource "marathon_app" "app-create-example" {
         container_path = "/etc/a"
         host_path = "/var/data/a"
         mode = "RO"
+        persistent {
+          size = 100
+        }
       }
       volume {
         container_path = "/etc/b"
@@ -76,6 +79,11 @@ resource "marathon_app" "app-create-example" {
 
   labels {
     test = "abc"
+  }
+
+  residency {
+    task_lost_behavior = "WAIT_FOREVER"
+    relaunch_escalation_timeout_seconds = 3600
   }
 
   upgrade_strategy {

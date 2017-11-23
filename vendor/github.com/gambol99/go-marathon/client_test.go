@@ -1,5 +1,5 @@
 /*
-Copyright 2014 Rohith All rights reserved.
+Copyright 2014 The go-marathon Authors All rights reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,8 +17,9 @@ limitations under the License.
 package marathon
 
 import (
-	"net/http"
 	"testing"
+
+	"net/http"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -35,8 +36,63 @@ func TestNewClient(t *testing.T) {
 
 	conf := cl.(*marathonClient).config
 
-	assert.Equal(t, conf.HTTPClient, http.DefaultClient)
+	assert.Equal(t, conf.HTTPClient, defaultHTTPClient)
+	assert.Equal(t, conf.HTTPSSEClient, defaultHTTPSSEClient)
+	assert.Zero(t, conf.HTTPSSEClient.Timeout)
 	assert.Equal(t, conf.PollingWaitTime, defaultPollingWaitTime)
+}
+
+func TestHTTPClientDefaults(t *testing.T) {
+	customHTTPRegularClient := http.DefaultClient
+
+	tests := []struct {
+		name                  string
+		httpRegularClient     *http.Client
+		httpSSEClient         *http.Client
+		wantHTTPRegularClient *http.Client
+		wantHTTPSSEClient     *http.Client
+	}{
+		{
+			name:                  "regular HTTP client missing",
+			httpRegularClient:     nil,
+			wantHTTPRegularClient: defaultHTTPClient,
+		},
+		{
+			name:              "SSE and regular HTTP clients missing",
+			httpSSEClient:     nil,
+			wantHTTPSSEClient: defaultHTTPSSEClient,
+		},
+		{
+			name:              "SSE HTTP client missing, regular HTTP client available",
+			httpSSEClient:     nil,
+			httpRegularClient: customHTTPRegularClient,
+			wantHTTPSSEClient: customHTTPRegularClient,
+		},
+	}
+
+	for _, test := range tests {
+		config := NewDefaultConfig()
+		config.HTTPClient = test.httpRegularClient
+		config.HTTPSSEClient = test.httpSSEClient
+
+		client, err := NewClient(config)
+		if !assert.NoError(t, err, test.name) {
+			continue
+		}
+
+		maraClient := client.(*marathonClient)
+		if test.wantHTTPRegularClient != nil {
+			if !assert.Equal(t, test.wantHTTPRegularClient, maraClient.config.HTTPClient, test.name) {
+				continue
+			}
+		}
+
+		if test.wantHTTPSSEClient != nil {
+			if !assert.Equal(t, test.wantHTTPSSEClient, maraClient.config.HTTPSSEClient, test.name) {
+				continue
+			}
+		}
+	}
 }
 
 func TestInvalidConfig(t *testing.T) {
@@ -129,6 +185,56 @@ func TestAPIRequest(t *testing.T) {
 		}
 		if !x.Ok && err == nil {
 			t.Errorf("case %d, expected to received an error", i)
+		}
+
+		endpoint.Close()
+	}
+}
+
+func TestBuildApiRequestFailure(t *testing.T) {
+	tests := []struct {
+		name              string
+		expectedError     error
+		expectedErrorType interface{}
+		path              string
+		clusterDown       bool
+	}{
+		{
+			name:          "cluster down",
+			expectedError: ErrMarathonDown,
+			clusterDown:   true,
+		},
+		{
+			name:              "invalid request parameter",
+			expectedErrorType: newRequestError{},
+			path:              "%zzzzz",
+		},
+	}
+
+	for _, test := range tests {
+		if test.expectedError == nil && test.expectedErrorType == nil {
+			panic("Testcase requires at least one of 'expectedError' or 'expectedErrorType'")
+		}
+
+		clientCfg := NewDefaultConfig()
+		config := configContainer{client: &clientCfg}
+		endpoint := newFakeMarathonEndpoint(t, &config)
+
+		client := endpoint.Client.(*marathonClient)
+
+		if test.clusterDown {
+			for _, member := range client.hosts.members {
+				member.status = memberStatusDown
+			}
+		}
+
+		_, _, err := client.buildAPIRequest("GET", test.path, nil)
+
+		if test.expectedError != nil {
+			assert.Equal(t, test.expectedError, err)
+		}
+		if test.expectedErrorType != nil {
+			assert.IsType(t, test.expectedErrorType, err)
 		}
 
 		endpoint.Close()

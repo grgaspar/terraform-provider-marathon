@@ -1,5 +1,5 @@
 /*
-Copyright 2014 Rohith All rights reserved.
+Copyright 2014 The go-marathon Authors All rights reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -24,9 +24,11 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 )
@@ -149,12 +151,28 @@ type Marathon interface {
 }
 
 var (
-	// ErrInvalidResponse is thrown when marathon responds with invalid or error response
-	ErrInvalidResponse = errors.New("invalid response from Marathon")
 	// ErrMarathonDown is thrown when all the marathon endpoints are down
 	ErrMarathonDown = errors.New("all the Marathon hosts are presently down")
 	// ErrTimeoutError is thrown when the operation has timed out
 	ErrTimeoutError = errors.New("the operation has timed out")
+
+	// Default HTTP client used for SSE subscription requests
+	// It is invalid to set client.Timeout because it includes time to read response so
+	// set dial, tls handshake and response header timeouts instead
+	defaultHTTPSSEClient = &http.Client{
+		Transport: &http.Transport{
+			Dial: (&net.Dialer{
+				Timeout: 5 * time.Second,
+			}).Dial,
+			ResponseHeaderTimeout: 10 * time.Second,
+			TLSHandshakeTimeout:   5 * time.Second,
+		},
+	}
+
+	// Default HTTP client used for non SSE requests
+	defaultHTTPClient = &http.Client{
+		Timeout: 10 * time.Second,
+	}
 )
 
 // EventsChannelContext holds contextual data for an EventsChannel.
@@ -189,12 +207,26 @@ type httpClient struct {
 	config Config
 }
 
+// newRequestError signals that creating a new http.Request failed
+type newRequestError struct {
+	error
+}
+
 // NewClient creates a new marathon client
 //		config:			the configuration to use
 func NewClient(config Config) (Marathon, error) {
-	// step: if no http client, set to default
+	// step: if the SSE HTTP client is missing, prefer a configured regular
+	// client, and otherwise use the default SSE HTTP client.
+	if config.HTTPSSEClient == nil {
+		config.HTTPSSEClient = defaultHTTPSSEClient
+		if config.HTTPClient != nil {
+			config.HTTPSSEClient = config.HTTPClient
+		}
+	}
+
+	// step: if a regular HTTP client is missing, use the default one.
 	if config.HTTPClient == nil {
-		config.HTTPClient = http.DefaultClient
+		config.HTTPClient = defaultHTTPClient
 	}
 
 	// step: if no polling wait time is set, default to 500 milliseconds.
@@ -238,23 +270,23 @@ func (r *marathonClient) Ping() (bool, error) {
 	return true, nil
 }
 
-func (r *marathonClient) apiGet(uri string, post, result interface{}) error {
-	return r.apiCall("GET", uri, post, result)
+func (r *marathonClient) apiGet(path string, post, result interface{}) error {
+	return r.apiCall("GET", path, post, result)
 }
 
-func (r *marathonClient) apiPut(uri string, post, result interface{}) error {
-	return r.apiCall("PUT", uri, post, result)
+func (r *marathonClient) apiPut(path string, post, result interface{}) error {
+	return r.apiCall("PUT", path, post, result)
 }
 
-func (r *marathonClient) apiPost(uri string, post, result interface{}) error {
-	return r.apiCall("POST", uri, post, result)
+func (r *marathonClient) apiPost(path string, post, result interface{}) error {
+	return r.apiCall("POST", path, post, result)
 }
 
-func (r *marathonClient) apiDelete(uri string, post, result interface{}) error {
-	return r.apiCall("DELETE", uri, post, result)
+func (r *marathonClient) apiDelete(path string, post, result interface{}) error {
+	return r.apiCall("DELETE", path, post, result)
 }
 
-func (r *marathonClient) apiCall(method, url string, body, result interface{}) error {
+func (r *marathonClient) apiCall(method, path string, body, result interface{}) error {
 	for {
 		// step: marshall the request to json
 		var requestBody []byte
@@ -266,7 +298,7 @@ func (r *marathonClient) apiCall(method, url string, body, result interface{}) e
 		}
 
 		// step: create the API request
-		request, member, err := r.buildAPIRequest(method, url, bytes.NewReader(requestBody))
+		request, member, err := r.buildAPIRequest(method, path, bytes.NewReader(requestBody))
 		if err != nil {
 			return err
 		}
@@ -297,8 +329,7 @@ func (r *marathonClient) apiCall(method, url string, body, result interface{}) e
 		if response.StatusCode >= 200 && response.StatusCode <= 299 {
 			if result != nil {
 				if err := json.Unmarshal(respBody, result); err != nil {
-					r.debugLog.Printf("apiCall(): failed to unmarshall the response from marathon, error: %s\n", err)
-					return ErrInvalidResponse
+					return fmt.Errorf("failed to unmarshal response from Marathon: %s", err)
 				}
 			}
 			return nil
@@ -316,8 +347,9 @@ func (r *marathonClient) apiCall(method, url string, body, result interface{}) e
 	}
 }
 
-// buildAPIRequest creates a default API request
-func (r *marathonClient) buildAPIRequest(method, uri string, reader io.Reader) (request *http.Request, member string, err error) {
+// buildAPIRequest creates a default API request.
+// It fails when there is no available member in the cluster anymore or when the request can not be built.
+func (r *marathonClient) buildAPIRequest(method, path string, reader io.Reader) (request *http.Request, member string, err error) {
 	// Grab a member from the cluster
 	member, err = r.hosts.getMember()
 	if err != nil {
@@ -325,16 +357,34 @@ func (r *marathonClient) buildAPIRequest(method, uri string, reader io.Reader) (
 	}
 
 	// Build the HTTP request to Marathon
-	request, err = r.client.buildMarathonRequest(method, member, uri, reader)
+	request, err = r.client.buildMarathonJSONRequest(method, member, path, reader)
 	if err != nil {
-		return nil, member, err
+		return nil, member, newRequestError{err}
 	}
 	return request, member, nil
 }
 
-func (rc *httpClient) buildMarathonRequest(method string, member string, uri string, reader io.Reader) (request *http.Request, err error) {
+// buildMarathonJSONRequest is like buildMarathonRequest but sets the
+// Content-Type and Accept headers to application/json.
+func (rc *httpClient) buildMarathonJSONRequest(method, member, path string, reader io.Reader) (request *http.Request, err error) {
+	req, err := rc.buildMarathonRequest(method, member, path, reader)
+	if err == nil {
+		req.Header.Add("Content-Type", "application/json")
+		req.Header.Add("Accept", "application/json")
+	}
+
+	return req, err
+}
+
+// buildMarathonRequest creates a new HTTP request and configures it according to the *httpClient configuration.
+// The path must not contain a leading "/", otherwise buildMarathonRequest will panic.
+func (rc *httpClient) buildMarathonRequest(method, member, path string, reader io.Reader) (request *http.Request, err error) {
+	if strings.HasPrefix(path, "/") {
+		panic(fmt.Sprintf("Path '%s' must not start with a leading slash", path))
+	}
+
 	// Create the endpoint URL
-	url := fmt.Sprintf("%s/%s", member, uri)
+	url := fmt.Sprintf("%s/%s", member, path)
 
 	// Instantiate an HTTP request
 	request, err = http.NewRequest(method, url, reader)
@@ -350,9 +400,6 @@ func (rc *httpClient) buildMarathonRequest(method string, member string, uri str
 	if rc.config.DCOSToken != "" {
 		request.Header.Add("Authorization", "token="+rc.config.DCOSToken)
 	}
-
-	request.Header.Add("Content-Type", "application/json")
-	request.Header.Add("Accept", "application/json")
 
 	return request, nil
 }

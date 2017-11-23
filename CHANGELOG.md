@@ -5,6 +5,8 @@
 - Added support for `unreachable_strategy` configuration
 - Added support for `kill_selection` configuration
 - Fixed `upgrade_strategy` configuration not being evaluated
+- Added support for `volumes.persistent` and `residency`
+- Upgraded go-marathon and eventsource libraries to support missing fields
 
 ## 1.2.0
 

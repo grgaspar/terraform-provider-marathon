@@ -244,6 +244,26 @@ func resourceMarathonApp() *schema.Resource {
 														},
 													},
 												},
+												"persistent": &schema.Schema{
+													Type:     schema.TypeList,
+													Optional: true,
+													Elem: &schema.Resource{
+														Schema: map[string]*schema.Schema{
+															"type": &schema.Schema{
+																Type:     schema.TypeString,
+																Optional: true,
+															},
+															"size": &schema.Schema{
+																Type:     schema.TypeInt,
+																Optional: true,
+															},
+															"max_size": &schema.Schema{
+																Type:     schema.TypeInt,
+																Optional: true,
+															},
+														},
+													},
+												},
 											},
 										},
 									},
@@ -460,6 +480,23 @@ func resourceMarathonApp() *schema.Resource {
 									},
 								},
 							},
+						},
+					},
+				},
+			},
+			"residency": &schema.Schema{
+				Type:     schema.TypeList,
+				Optional: true,
+				ForceNew: false,
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						"task_lost_behavior": &schema.Schema{
+							Type:     schema.TypeString,
+							Optional: true,
+						},
+						"relaunch_escalation_timeout_seconds": &schema.Schema{
+							Type:     schema.TypeInt,
+							Optional: true,
 						},
 					},
 				},
@@ -784,6 +821,9 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 				if volume.External != nil {
 					volumeMap["external"] = volume.External
 				}
+				if volume.Persistent != nil {
+					volumeMap["persistence"] = volume.Persistent
+				}
 				volumes[idx] = volumeMap
 			}
 			containerMap["volumes"] = []interface{}{map[string]interface{}{"volume": volumes}}
@@ -967,6 +1007,20 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 	} else {
 		d.Set("port_definitions", nil)
 	}
+
+	if app.Residency != nil {
+		resMap := make(map[string]interface{})
+		resMap["task_lost_behavior"] = app.Residency.TaskLostBehavior
+		resMap["relaunch_escalation_timeout_seconds"] = app.Residency.RelaunchEscalationTimeoutSeconds
+		err := d.Set("residency", &[]interface{}{resMap})
+
+		if err != nil {
+			return errors.New("Failed to set residency: " + err.Error())
+		}
+	} else {
+		d.Set("upgrade_strategy", nil)
+	}
+	d.SetPartial("upgrade_strategy")
 
 	if app.UpgradeStrategy != nil {
 		usMap := make(map[string]interface{})
@@ -1277,6 +1331,23 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 						volumes[i].External = external
 					}
 				}
+
+				if volumeMap["persistent"] != nil {
+					persistentMap := d.Get(fmt.Sprintf("container.0.volumes.0.volume.%d.persistent.0", i)).(map[string]interface{})
+					if len(persistentMap) > 0 {
+						persistent := new(marathon.PersistentVolume)
+						if val, ok := persistentMap["type"]; ok {
+							persistent.Type = val.(marathon.PersistentVolumeType)
+						}
+						if val, ok := persistentMap["size"]; ok {
+							persistent.Size = val.(int)
+						}
+						if val, ok := persistentMap["max_size"]; ok {
+							persistent.MaxSize = val.(int)
+						}
+						volumes[i].Persistent = persistent
+					}
+				}
 			}
 			container.Volumes = &volumes
 		}
@@ -1486,6 +1557,24 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 	} else {
 		application.PortDefinitions = nil
 	}
+
+	residency := marathon.Residency{}
+
+	if v, ok := d.GetOk("residency.0.task_lost_behavior"); ok {
+		f, ok := v.(marathon.TaskLostBehaviorType)
+		if ok {
+			residency.TaskLostBehavior = f
+		}
+	}
+
+	if v, ok := d.GetOk("residency.0.relaunch_escalation_timeout_seconds"); ok {
+		f, ok := v.(int)
+		if ok {
+			residency.RelaunchEscalationTimeoutSeconds = f
+		}
+	}
+
+	application.Residency = &residency
 
 	upgradeStrategy := marathon.UpgradeStrategy{}
 
