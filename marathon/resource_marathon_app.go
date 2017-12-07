@@ -332,7 +332,7 @@ func resourceMarathonApp() *schema.Resource {
 						"extract": &schema.Schema{
 							Type:     schema.TypeBool,
 							Optional: true,
-							Default:  false,
+							Default:  true,
 						},
 					},
 				},
@@ -356,7 +356,6 @@ func resourceMarathonApp() *schema.Resource {
 									},
 									"path": &schema.Schema{
 										Type:     schema.TypeString,
-										Default:  "/",
 										Optional: true,
 									},
 									"grace_period_seconds": &schema.Schema{
@@ -777,6 +776,7 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 			dockerMap["image"] = docker.Image
 			log.Println("DOCKERIMAGE: " + docker.Image)
 			dockerMap["force_pull_image"] = *docker.ForcePullImage
+
 			dockerMap["network"] = docker.Network
 			parameters := make([]map[string]string, len(*docker.Parameters))
 			for idx, p := range *docker.Parameters {
@@ -785,7 +785,9 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 				parameter["value"] = p.Value
 				parameters[idx] = parameter
 			}
-			dockerMap["parameters"] = []interface{}{map[string]interface{}{"parameter": parameters}}
+			if len(*docker.Parameters) > 0 {
+				dockerMap["parameters"] = []interface{}{map[string]interface{}{"parameter": parameters}}
+			}
 			dockerMap["privileged"] = *docker.Privileged
 
 			if docker.PortMappings != nil && len(*docker.PortMappings) > 0 {
@@ -822,7 +824,13 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 					volumeMap["external"] = volume.External
 				}
 				if volume.Persistent != nil {
-					volumeMap["persistence"] = volume.Persistent
+					persistent := make(map[string]interface{})
+					persistent["type"] = volume.Persistent.Type
+					persistent["size"] = volume.Persistent.Size
+					persistent["max_size"] = volume.Persistent.MaxSize
+					persistents := make([]interface{}, 1)
+					persistents[0] = persistent
+					volumeMap["persistent"] = persistents
 				}
 				volumes[idx] = volumeMap
 			}
@@ -862,9 +870,11 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 
 	d.SetPartial("disk")
 
-	err = d.Set("dependencies", &app.Dependencies)
-	if err != nil {
-		return errors.New("Failed to set dependencies: " + err.Error())
+	if app.Dependencies != nil {
+		err = d.Set("dependencies", &app.Dependencies)
+		if err != nil {
+			return errors.New("Failed to set dependencies: " + err.Error())
+		}
 	}
 
 	d.SetPartial("dependencies")
@@ -900,6 +910,12 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 		}
 	} else {
 		d.Set("fetch", nil)
+
+		err = d.Set("uris", app.Uris)
+		if err != nil {
+			return errors.New("Failed to set uris: " + err.Error())
+		}
+		d.SetPartial("uris")
 	}
 
 	d.SetPartial("fetch")
@@ -971,15 +987,6 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 
 	d.SetPartial("max_launch_delay_seconds")
 
-	if givenFreePortsDoesNotEqualAllocated(d, app) {
-		err := d.Set("ports", app.Ports)
-
-		if err != nil {
-			return errors.New("Failed to set ports: " + err.Error())
-		}
-	}
-	d.SetPartial("ports")
-
 	err = d.Set("require_ports", app.RequirePorts)
 	if err != nil {
 		return errors.New("Failed to set require_ports: " + err.Error())
@@ -994,9 +1001,15 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 			if portDefinition.Port != nil {
 				hMap["port"] = *portDefinition.Port
 			}
-			hMap["protocol"] = portDefinition.Protocol
-			hMap["name"] = portDefinition.Name
-			hMap["labels"] = *portDefinition.Labels
+			if portDefinition.Protocol != "" {
+				hMap["protocol"] = portDefinition.Protocol
+			}
+			if portDefinition.Name != "" {
+				hMap["name"] = portDefinition.Name
+			}
+			if portDefinition.Labels != nil {
+				hMap["labels"] = *portDefinition.Labels
+			}
 			portDefinitions[idx] = hMap
 		}
 		err := d.Set("port_definitions", &[]interface{}{map[string]interface{}{"port_definition": portDefinitions}})
@@ -1006,6 +1019,17 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 		}
 	} else {
 		d.Set("port_definitions", nil)
+
+		if app.Ports != nil {
+			if givenFreePortsDoesNotEqualAllocated(d, app) {
+				err := d.Set("ports", app.Ports)
+
+				if err != nil {
+					return errors.New("Failed to set ports: " + err.Error())
+				}
+			}
+			d.SetPartial("ports")
+		}
 	}
 
 	if app.Residency != nil {
@@ -1017,10 +1041,10 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 		if err != nil {
 			return errors.New("Failed to set residency: " + err.Error())
 		}
-	} else {
-		d.Set("upgrade_strategy", nil)
-	}
-	d.SetPartial("upgrade_strategy")
+	} //else {
+		//d.Set("residency", nil)
+	//}
+	//d.SetPartial("residency")
 
 	if app.UpgradeStrategy != nil {
 		usMap := make(map[string]interface{})
@@ -1038,13 +1062,19 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 
 	if app.UnreachableStrategy != nil {
 		unrMap := make(map[string]interface{})
-		unrMap["inactive_after_seconds"] = *app.UnreachableStrategy.InactiveAfterSeconds
-		unrMap["expunge_after_seconds"] = *app.UnreachableStrategy.ExpungeAfterSeconds
-		err := d.Set("unreachable_strategy", &[]interface{}{unrMap})
-
-		if err != nil {
-			return errors.New("Failed to set unreachable_strategy: " + err.Error())
+		if app.UnreachableStrategy.InactiveAfterSeconds != nil {
+			unrMap["inactive_after_seconds"] = *app.UnreachableStrategy.InactiveAfterSeconds
 		}
+		if app.UnreachableStrategy.ExpungeAfterSeconds != nil {
+			unrMap["expunge_after_seconds"] = *app.UnreachableStrategy.ExpungeAfterSeconds
+		}
+		if app.UnreachableStrategy.AbsenceReason == "" {
+			err := d.Set("unreachable_strategy", &[]interface{}{unrMap})
+			if err != nil {
+				return errors.New("Failed to set unreachable_strategy: " + err.Error())
+			}
+		}
+
 	} else {
 		d.Set("unreachable_strategy", nil)
 	}
@@ -1061,12 +1091,6 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 		return errors.New("Failed to set user: " + err.Error())
 	}
 	d.SetPartial("user")
-
-	err = d.Set("uris", app.Uris)
-	if err != nil {
-		return errors.New("Failed to set uris: " + err.Error())
-	}
-	d.SetPartial("uris")
 
 	err = d.Set("executor", *app.Executor)
 	if err != nil {
@@ -1418,6 +1442,18 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 		application.Fetch = &fetch
 	} else {
 		application.Fetch = nil
+
+		if v, ok := d.GetOk("uris.#"); ok {
+			uris := make([]string, v.(int))
+
+			for i := range uris {
+				uris[i] = d.Get("uris." + strconv.Itoa(i)).(string)
+			}
+
+			if len(uris) != 0 {
+				application.Uris = &uris
+			}
+		}
 	}
 
 	if v, ok := d.GetOk("health_checks.0.health_check.#"); ok {
@@ -1432,12 +1468,18 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 				commandMap := commands[0].(map[string]interface{})
 				healthCheck.Command = &marathon.Command{Value: commandMap["value"].(string)}
 				healthCheck.Protocol = "COMMAND"
-				path := ""
-				healthCheck.Path = &path
+				if prop, ok := mapStruct["path"]; ok {
+					prop := prop.(string)
+					if prop != "" {
+						healthCheck.Path = &prop
+					}
+				}
 			} else {
 				if prop, ok := mapStruct["path"]; ok {
 					prop := prop.(string)
-					healthCheck.Path = &prop
+					if prop != "" {
+						healthCheck.Path = &prop
+					}
 				}
 
 				if prop, ok := mapStruct["port_index"]; ok {
@@ -1501,9 +1543,6 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 		}
 
 		application.Labels = &labels
-	} else {
-		labels := make(map[string]string, 0)
-		application.Labels = &labels
 	}
 
 	if v, ok := d.GetOk("mem"); ok {
@@ -1520,8 +1559,6 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 		v := v.(bool)
 		application.RequirePorts = &v
 	}
-
-	application.Ports = getPorts(d)
 
 	if v, ok := d.GetOk("port_definitions.0.port_definition.#"); ok {
 		portDefinitions := make([]marathon.PortDefinition, v.(int))
@@ -1548,14 +1585,22 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 			for key, value := range labelsMap {
 				labels[key] = value.(string)
 			}
-			portDefinition.Labels = &labels
+
+			if len(labelsMap) > 0 {
+				portDefinition.Labels = &labels
+			}
 
 			portDefinitions[i] = *portDefinition
 		}
 
 		application.PortDefinitions = &portDefinitions
 	} else {
-		application.PortDefinitions = nil
+		portDefinitions := make([]marathon.PortDefinition, 0)
+		application.PortDefinitions = &portDefinitions
+
+		if _, ok := d.GetOk("ports"); ok {
+			application.Ports = getPorts(d)
+		}
 	}
 
 	residency := marathon.Residency{}
@@ -1574,42 +1619,59 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 		}
 	}
 
-	application.Residency = &residency
+	if _, ok := d.GetOk("residency"); ok {
+		application.Residency = &residency
+	}
 
 	upgradeStrategy := marathon.UpgradeStrategy{}
 
-	if v, ok := d.GetOk("upgrade_strategy.0.minimum_health_capacity"); ok {
+	if v, ok := d.GetOkExists("upgrade_strategy.0.minimum_health_capacity"); ok {
 		f, ok := v.(float64)
 		if ok {
 			upgradeStrategy.MinimumHealthCapacity = &f
 		}
+	} else {
+		f := 1.0
+		upgradeStrategy.MinimumHealthCapacity = &f
 	}
 
-	if v, ok := d.GetOk("upgrade_strategy.0.maximum_over_capacity"); ok {
+	if v, ok := d.GetOkExists("upgrade_strategy.0.maximum_over_capacity"); ok {
 		f, ok := v.(float64)
 		if ok {
 			upgradeStrategy.MaximumOverCapacity = &f
 		}
+	} else {
+		f := 1.0
+		upgradeStrategy.MaximumOverCapacity = &f
 	}
 
-	application.SetUpgradeStrategy(upgradeStrategy)
+	if _, ok := d.GetOk("upgrade_strategy"); ok {
+		application.SetUpgradeStrategy(upgradeStrategy)
+	}
 
 	unreachableStrategy := marathon.UnreachableStrategy{}
-	if v, ok := d.GetOk("unreachable_strategy.0.inactive_after_seconds"); ok {
+	if v, ok := d.GetOkExists("unreachable_strategy.0.inactive_after_seconds"); ok {
 		f, ok := v.(float64)
 		if ok {
 			unreachableStrategy.InactiveAfterSeconds = &f
 		}
 	}
 
-	if v, ok := d.GetOk("unreachable_strategy.0.expunge_after_seconds"); ok {
+	if v, ok := d.GetOkExists("unreachable_strategy.0.expunge_after_seconds"); ok {
 		f, ok := v.(float64)
 		if ok {
 			unreachableStrategy.ExpungeAfterSeconds = &f
 		}
 	}
 
-	application.SetUnreachableStrategy(unreachableStrategy)
+	if v,ok := d.GetOk("unreachable_strategy"); ok {
+		switch v.(type) {
+		case string:
+			application.UnreachableStrategy = nil
+		default:
+			application.SetUnreachableStrategy(unreachableStrategy)
+		}
+	}
 
 	if v, ok := d.GetOk("kill_selection"); ok {
 		v := v.(string)
@@ -1619,18 +1681,6 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 	if v, ok := d.GetOk("user"); ok {
 		v := v.(string)
 		application.User = v
-	}
-
-	if v, ok := d.GetOk("uris.#"); ok {
-		uris := make([]string, v.(int))
-
-		for i := range uris {
-			uris[i] = d.Get("uris." + strconv.Itoa(i)).(string)
-		}
-
-		if len(uris) != 0 {
-			application.Uris = &uris
-		}
 	}
 
 	return application
@@ -1647,3 +1697,5 @@ func getPorts(d *schema.ResourceData) []int {
 	}
 	return ports
 }
+
+

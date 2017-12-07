@@ -32,7 +32,7 @@ resource "marathon_app" "app-create-example" {
           container_port = 161
           host_port = 0
           protocol = "udp"
-          name = "port161"
+          name = "port_161"
         }
       }
     }

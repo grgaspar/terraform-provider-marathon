@@ -8,6 +8,7 @@ import (
 	"github.com/gambol99/go-marathon"
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/hashicorp/terraform/terraform"
+	"strings"
 )
 
 // Provider is the provider for terraform
@@ -70,9 +71,12 @@ func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 	marathonConfig := marathon.NewDefaultConfig()
 
 	marathonConfig.URL = d.Get("url").(string)
-	marathonConfig.HTTPClient = &http.Client{
-		Timeout: time.Duration(d.Get("request_timeout").(int)) * time.Second,
+	if ! strings.HasPrefix(marathonConfig.URL, "https") {
+		marathonConfig.HTTPClient = &http.Client{
+			Timeout: time.Duration(d.Get("request_timeout").(int)) * time.Second,
+		}
 	}
+
 	marathonConfig.HTTPBasicAuthUser = d.Get("basic_auth_user").(string)
 	marathonConfig.HTTPBasicPassword = d.Get("basic_auth_password").(string)
 	marathonConfig.DCOSToken = d.Get("dcos_token").(string)
@@ -81,8 +85,10 @@ func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 	}
 	marathonConfig.EventsTransport = marathon.EventsTransportSSE
 
-	marathonConfig.HTTPClient = &http.Client{
-		Timeout: (time.Duration(d.Get("deployment_timeout").(int)) * time.Second),
+	if ! strings.HasPrefix(marathonConfig.URL, "https") {
+		marathonConfig.HTTPClient = &http.Client{
+			Timeout: (time.Duration(d.Get("deployment_timeout").(int)) * time.Second),
+		}
 	}
 
 	config := config{
