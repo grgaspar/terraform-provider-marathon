@@ -252,6 +252,7 @@ func resourceMarathonApp() *schema.Resource {
 															"type": &schema.Schema{
 																Type:     schema.TypeString,
 																Optional: true,
+																Default:  "root",
 															},
 															"size": &schema.Schema{
 																Type:     schema.TypeInt,
@@ -796,7 +797,11 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 					pmMap := make(map[string]interface{})
 					pmMap["container_port"] = portMapping.ContainerPort
 					pmMap["host_port"] = portMapping.HostPort
-					// pmMap["service_port"] = portMapping.ServicePort
+					_, ok := d.GetOk("container.0.docker.0.port_mappings.0.port_mapping." + strconv.Itoa(idx) + ".service_port")
+					if ok {
+						pmMap["service_port"] = portMapping.ServicePort
+					}
+
 					pmMap["protocol"] = portMapping.Protocol
 					labels := make(map[string]string, len(*portMapping.Labels))
 					for k, v := range *portMapping.Labels {
@@ -821,7 +826,13 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 				volumeMap["host_path"] = volume.HostPath
 				volumeMap["mode"] = volume.Mode
 				if volume.External != nil {
-					volumeMap["external"] = volume.External
+					external := make(map[string]interface{})
+					external["name"] = volume.External.Name
+					external["provider"] = volume.External.Provider
+					external["options"] = *volume.External.Options
+					externals := make([]interface{}, 1)
+					externals[0] = external
+					volumeMap["external"] = externals
 				}
 				if volume.Persistent != nil {
 					persistent := make(map[string]interface{})
@@ -995,27 +1006,32 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 	d.SetPartial("require_ports")
 
 	if app.PortDefinitions != nil && len(*app.PortDefinitions) > 0 {
-		portDefinitions := make([]map[string]interface{}, len(*app.PortDefinitions))
-		for idx, portDefinition := range *app.PortDefinitions {
-			hMap := make(map[string]interface{})
-			if portDefinition.Port != nil {
-				hMap["port"] = *portDefinition.Port
+		// If there is a port mapping, do not set port definitions that comes from Marathon API and belong to the port mapping
+		if _, ok := d.GetOk("container.0.docker.0.port_mappings.0.port_mapping.#"); !ok {
+			portDefinitions := make([]map[string]interface{}, len(*app.PortDefinitions))
+			for idx, portDefinition := range *app.PortDefinitions {
+				hMap := make(map[string]interface{})
+				if portDefinition.Port != nil {
+					if _, ok := d.GetOk("port_definitions.0.port_definition." + strconv.Itoa(idx) + ".port"); ok {
+						hMap["port"] = *portDefinition.Port
+					}
+				}
+				if portDefinition.Protocol != "" {
+					hMap["protocol"] = portDefinition.Protocol
+				}
+				if portDefinition.Name != "" {
+					hMap["name"] = portDefinition.Name
+				}
+				if portDefinition.Labels != nil {
+					hMap["labels"] = *portDefinition.Labels
+				}
+				portDefinitions[idx] = hMap
 			}
-			if portDefinition.Protocol != "" {
-				hMap["protocol"] = portDefinition.Protocol
-			}
-			if portDefinition.Name != "" {
-				hMap["name"] = portDefinition.Name
-			}
-			if portDefinition.Labels != nil {
-				hMap["labels"] = *portDefinition.Labels
-			}
-			portDefinitions[idx] = hMap
-		}
-		err := d.Set("port_definitions", &[]interface{}{map[string]interface{}{"port_definition": portDefinitions}})
+			err := d.Set("port_definitions", &[]interface{}{map[string]interface{}{"port_definition": portDefinitions}})
 
-		if err != nil {
-			return errors.New("Failed to set port_definitions: " + err.Error())
+			if err != nil {
+				return errors.New("Failed to set port_definitions: " + err.Error())
+			}
 		}
 	} else {
 		d.Set("port_definitions", nil)
@@ -1361,7 +1377,7 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 					if len(persistentMap) > 0 {
 						persistent := new(marathon.PersistentVolume)
 						if val, ok := persistentMap["type"]; ok {
-							persistent.Type = val.(marathon.PersistentVolumeType)
+							persistent.Type =  marathon.PersistentVolumeType(val.(string))
 						}
 						if val, ok := persistentMap["size"]; ok {
 							persistent.Size = val.(int)
@@ -1561,39 +1577,41 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 	}
 
 	if v, ok := d.GetOk("port_definitions.0.port_definition.#"); ok {
-		portDefinitions := make([]marathon.PortDefinition, v.(int))
+		if _, ok2 := d.GetOk("container.0.docker.0.port_mappings.0.port_mapping.#"); !ok2 {
+			portDefinitions := make([]marathon.PortDefinition, v.(int))
 
-		for i := range portDefinitions {
-			portDefinition := new(marathon.PortDefinition)
-			mapStruct := d.Get("port_definitions.0.port_definition." + strconv.Itoa(i)).(map[string]interface{})
+			for i := range portDefinitions {
+				portDefinition := new(marathon.PortDefinition)
+				mapStruct := d.Get("port_definitions.0.port_definition." + strconv.Itoa(i)).(map[string]interface{})
 
-			if prop, ok := mapStruct["port"]; ok {
-				prop := prop.(int)
-				portDefinition.Port = &prop
+				if prop, ok := mapStruct["port"]; ok {
+					prop := prop.(int)
+					portDefinition.Port = &prop
+				}
+
+				if prop, ok := mapStruct["protocol"]; ok {
+					portDefinition.Protocol = prop.(string)
+				}
+
+				if prop, ok := mapStruct["name"]; ok {
+					portDefinition.Name = prop.(string)
+				}
+
+				labelsMap := d.Get(fmt.Sprintf("port_definitions.0.port_definition.%d.labels", i)).(map[string]interface{})
+				labels := make(map[string]string, len(labelsMap))
+				for key, value := range labelsMap {
+					labels[key] = value.(string)
+				}
+
+				if len(labelsMap) > 0 {
+					portDefinition.Labels = &labels
+				}
+
+				portDefinitions[i] = *portDefinition
 			}
 
-			if prop, ok := mapStruct["protocol"]; ok {
-				portDefinition.Protocol = prop.(string)
-			}
-
-			if prop, ok := mapStruct["name"]; ok {
-				portDefinition.Name = prop.(string)
-			}
-
-			labelsMap := d.Get(fmt.Sprintf("port_definitions.0.port_definition.%d.labels", i)).(map[string]interface{})
-			labels := make(map[string]string, len(labelsMap))
-			for key, value := range labelsMap {
-				labels[key] = value.(string)
-			}
-
-			if len(labelsMap) > 0 {
-				portDefinition.Labels = &labels
-			}
-
-			portDefinitions[i] = *portDefinition
+			application.PortDefinitions = &portDefinitions
 		}
-
-		application.PortDefinitions = &portDefinitions
 	} else {
 		portDefinitions := make([]marathon.PortDefinition, 0)
 		application.PortDefinitions = &portDefinitions
