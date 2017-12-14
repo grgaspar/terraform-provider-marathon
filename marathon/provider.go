@@ -85,11 +85,13 @@ func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 	}
 	marathonConfig.EventsTransport = marathon.EventsTransportSSE
 
-	if ! strings.HasPrefix(marathonConfig.URL, "https") {
-		marathonConfig.HTTPClient = &http.Client{
-			Timeout: (time.Duration(d.Get("deployment_timeout").(int)) * time.Second),
-		}
-	}
+	//if ! strings.HasPrefix(marathonConfig.URL, "https") {
+	//	marathonConfig.HTTPClient = &http.Client{
+	//		Timeout: (time.Duration(d.Get("deployment_timeout").(int)) * time.Second),
+	//	}
+	//}
+
+	marathonConfig.HTTPClient = &http.Client{}
 
 	config := config{
 		config: marathonConfig,

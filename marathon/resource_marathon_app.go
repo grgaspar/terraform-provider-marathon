@@ -1613,11 +1613,11 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 			application.PortDefinitions = &portDefinitions
 		}
 	} else {
-		portDefinitions := make([]marathon.PortDefinition, 0)
-		application.PortDefinitions = &portDefinitions
-
 		if _, ok := d.GetOk("ports"); ok {
 			application.Ports = getPorts(d)
+		} else {
+			portDefinitions := make([]marathon.PortDefinition, 0)
+			application.PortDefinitions = &portDefinitions
 		}
 	}
 

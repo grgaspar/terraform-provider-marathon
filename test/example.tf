@@ -32,29 +32,17 @@ resource "marathon_app" "app-create-example" {
           container_port = 161
           host_port = 0
           protocol = "udp"
-          name = "port_161"
+          name = "port161"
         }
       }
     }
 
     volumes {
       volume {
-        container_path = "/etc/a"
-        host_path = "/var/data/a"
-        mode = "RO"
-        persistent {
-          size = 100
-        }
-      }
-      volume {
-        container_path = "/etc/b"
+        container_path = "examplepath"
         mode = "RW"
-        external {
-          name = "external-volume"
-          provider = "dvdi"
-          options {
-            "dvdi/driver" = "rexray"
-          }
+        persistent {
+          size = 10
         }
       }
     }
@@ -83,16 +71,11 @@ resource "marathon_app" "app-create-example" {
 
   residency {
     task_lost_behavior = "WAIT_FOREVER"
-    relaunch_escalation_timeout_seconds = 3600
+    relaunch_escalation_timeout_seconds = 60
   }
 
   upgrade_strategy {
-    minimum_health_capacity = 0.5
-    maximum_over_capacity = 0.3
-  }
-
-  unreachable_strategy {
-    inactive_after_seconds = 60
-    expunge_after_seconds = 120
+    minimum_health_capacity = 0
+    maximum_over_capacity = 0
   }
 }
