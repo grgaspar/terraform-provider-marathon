@@ -7,6 +7,7 @@
 - Fixed `upgrade_strategy` configuration not being evaluated
 - Added support for `volumes.persistent` and `residency`
 - Upgraded go-marathon and eventsource libraries to support missing fields
+- Added support for DCOS frameworks, to wait for the full framework deploy
 
 ## 1.2.0
 

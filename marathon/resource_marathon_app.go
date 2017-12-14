@@ -1,9 +1,12 @@
 package marathon
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"log"
+	"net/http"
 	"reflect"
 	"strconv"
 	"time"
@@ -20,6 +23,36 @@ func resourceMarathonApp() *schema.Resource {
 		Delete: resourceMarathonAppDelete,
 
 		Schema: map[string]*schema.Schema{
+			"dcos_framework": &schema.Schema{
+				Type:     schema.TypeList,
+				Optional: true,
+				ForceNew: false,
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						"plan_path": &schema.Schema{
+							Type:     schema.TypeString,
+							Optional: true,
+							Default:  "v1/plan",
+						},
+						"timeout": &schema.Schema{
+							Type:        schema.TypeInt,
+							Optional:    true,
+							Default:     600,
+							Description: "Timeout in seconds to wait for a framework to complete deployment",
+						},
+						"mesos_dns_resolver": &schema.Schema{
+							Type:     schema.TypeString,
+							Optional: true,
+							Default:  "http://master.mesos:8123",
+						},
+						"is_framework": &schema.Schema{
+							Type:     schema.TypeBool,
+							Optional: true,
+							Default:  false,
+						},
+					},
+				},
+			},
 			"accepted_resource_roles": &schema.Schema{
 				Type:     schema.TypeList,
 				Optional: true,
@@ -619,6 +652,30 @@ func waitOnSuccessfulDeployment(c chan deploymentEvent, id string, timeout time.
 	return nil
 }
 
+func waitOnDcosFrameworkDeployment(d *schema.ResourceData, frameworkName string) error {
+	frameworkHostPort, err := mesosDNSHostPort(d.Get("dcos_framework.mesos_dns_resolver").(string), frameworkName)
+	if err != nil {
+		log.Println("[ERROR] attempting to locate framework host and port", frameworkName, err)
+		return err
+	}
+
+	timeout := time.After(time.Duration(d.Get("dcos_framework.timeout").(int)) * time.Second)
+	tick := time.Tick(10 * time.Second)
+	for {
+		select {
+		case <-timeout:
+			return errors.New("framework deployment timeout reached")
+		case <-tick:
+			complete, err := isDcosFrameworkDeployComplete(d, frameworkHostPort)
+			if err != nil {
+				return err
+			} else if complete {
+				return nil
+			}
+		}
+	}
+}
+
 func resourceMarathonAppCreate(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(config)
 	client := config.Client
@@ -647,6 +704,14 @@ func resourceMarathonAppCreate(d *schema.ResourceData, meta interface{}) error {
 		err = waitOnSuccessfulDeployment(c, deploymentID.DeploymentID, config.DefaultDeploymentTimeout)
 		if err != nil {
 			log.Println("[ERROR] waiting for application for deployment", deploymentID, err)
+			return err
+		}
+	}
+
+	if d.Get("dcos_framework.is_framework").(bool) {
+		err = waitOnDcosFrameworkDeployment(d, application.ID)
+		if err != nil {
+			log.Println("[ERROR] waiting for framework for deployment", application.ID, err)
 			return err
 		}
 	}
@@ -1058,7 +1123,7 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 			return errors.New("Failed to set residency: " + err.Error())
 		}
 	} //else {
-		//d.Set("residency", nil)
+	//d.Set("residency", nil)
 	//}
 	//d.SetPartial("residency")
 
@@ -1159,7 +1224,18 @@ func resourceMarathonAppUpdate(d *schema.ResourceData, meta interface{}) error {
 	}
 
 	err = waitOnSuccessfulDeployment(c, deploymentID.DeploymentID, config.DefaultDeploymentTimeout)
-	return err
+	if err != nil {
+		return err
+	}
+
+	if d.Get("dcos_framework.is_framework").(bool) {
+		err = waitOnDcosFrameworkDeployment(d, application.ID)
+		if err != nil {
+			log.Println("[ERROR] waiting for framework for deployment", application.ID, err)
+			return err
+		}
+	}
+	return nil
 }
 
 func resourceMarathonAppDelete(d *schema.ResourceData, meta interface{}) error {
@@ -1377,7 +1453,7 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 					if len(persistentMap) > 0 {
 						persistent := new(marathon.PersistentVolume)
 						if val, ok := persistentMap["type"]; ok {
-							persistent.Type =  marathon.PersistentVolumeType(val.(string))
+							persistent.Type = marathon.PersistentVolumeType(val.(string))
 						}
 						if val, ok := persistentMap["size"]; ok {
 							persistent.Size = val.(int)
@@ -1682,7 +1758,7 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 		}
 	}
 
-	if v,ok := d.GetOk("unreachable_strategy"); ok {
+	if v, ok := d.GetOk("unreachable_strategy"); ok {
 		switch v.(type) {
 		case string:
 			application.UnreachableStrategy = nil
@@ -1716,4 +1792,36 @@ func getPorts(d *schema.ResourceData) []int {
 	return ports
 }
 
+func isDcosFrameworkDeployComplete(d *schema.ResourceData, frameworkHostPort string) (bool, error) {
+	url := fmt.Sprintf("http://%s/%s", frameworkHostPort, d.Get("dcos_framework.plan_path"))
 
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return false, err
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	data, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return false, err
+	}
+
+	var plan map[string]interface{}
+	err = json.Unmarshal([]byte(data), &plan)
+	if err != nil {
+		err = errors.New("failed json unmarshal")
+		return false, err
+	}
+
+	status := plan["status"].(string)
+	if status == "COMPLETE" {
+		return true, nil
+	}
+	return false, nil
+}
