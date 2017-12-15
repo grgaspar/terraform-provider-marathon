@@ -50,6 +50,12 @@ func Provider() terraform.ResourceProvider {
 				Default:     "",
 				Description: "DCOS token",
 			},
+			"dcos_url": &schema.Schema{
+				Type:        schema.TypeString,
+				Optional:    true,
+				Default:     "",
+				Description: "DCOS URL",
+			},
 			"log_output": &schema.Schema{
 				Type:        schema.TypeBool,
 				Optional:    true,
@@ -91,6 +97,7 @@ func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 	config := config{
 		config: marathonConfig,
 		DefaultDeploymentTimeout: time.Duration(d.Get("deployment_timeout").(int)) * time.Second,
+		DcosURL:                  d.Get("dcos_url").(string),
 	}
 
 	log.Printf("Configured: %#v", config)

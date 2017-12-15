@@ -40,11 +40,6 @@ func resourceMarathonApp() *schema.Resource {
 							Default:     600,
 							Description: "Timeout in seconds to wait for a framework to complete deployment",
 						},
-						"mesos_dns_resolver": &schema.Schema{
-							Type:     schema.TypeString,
-							Optional: true,
-							Default:  "http://master.mesos:8123",
-						},
 						"is_framework": &schema.Schema{
 							Type:     schema.TypeBool,
 							Optional: true,
@@ -652,21 +647,23 @@ func waitOnSuccessfulDeployment(c chan deploymentEvent, id string, timeout time.
 	return nil
 }
 
-func waitOnDcosFrameworkDeployment(d *schema.ResourceData, frameworkName string) error {
-	frameworkHostPort, err := mesosDNSHostPort(d.Get("dcos_framework.mesos_dns_resolver").(string), frameworkName)
-	if err != nil {
-		log.Println("[ERROR] attempting to locate framework host and port", frameworkName, err)
-		return err
+func waitOnDcosFrameworkDeployment(d *schema.ResourceData, frameworkName string, c config) error {
+	var frameworkURL string
+
+	if c.DcosURL != "" {
+		frameworkURL = fmt.Sprintf("%s/service/%s", c.DcosURL, frameworkName)
+	} else {
+		return errors.New("dcos_url not supplied and is required if is_framework=true")
 	}
 
-	timeout := time.After(time.Duration(d.Get("dcos_framework.timeout").(int)) * time.Second)
+	timeout := time.After(time.Duration(d.Get("dcos_framework.0.timeout").(int)) * time.Second)
 	tick := time.Tick(10 * time.Second)
 	for {
 		select {
 		case <-timeout:
 			return errors.New("framework deployment timeout reached")
 		case <-tick:
-			complete, err := isDcosFrameworkDeployComplete(d, frameworkHostPort)
+			complete, err := isDcosFrameworkDeployComplete(d, frameworkURL, c.config.DCOSToken)
 			if err != nil {
 				return err
 			} else if complete {
@@ -708,8 +705,8 @@ func resourceMarathonAppCreate(d *schema.ResourceData, meta interface{}) error {
 		}
 	}
 
-	if d.Get("dcos_framework.is_framework").(bool) {
-		err = waitOnDcosFrameworkDeployment(d, application.ID)
+	if d.Get("dcos_framework.0.is_framework").(bool) {
+		err = waitOnDcosFrameworkDeployment(d, application.ID, config)
 		if err != nil {
 			log.Println("[ERROR] waiting for framework for deployment", application.ID, err)
 			return err
@@ -1228,8 +1225,8 @@ func resourceMarathonAppUpdate(d *schema.ResourceData, meta interface{}) error {
 		return err
 	}
 
-	if d.Get("dcos_framework.is_framework").(bool) {
-		err = waitOnDcosFrameworkDeployment(d, application.ID)
+	if d.Get("dcos_framework.0.is_framework").(bool) {
+		err = waitOnDcosFrameworkDeployment(d, application.ID, config)
 		if err != nil {
 			log.Println("[ERROR] waiting for framework for deployment", application.ID, err)
 			return err
@@ -1792,14 +1789,16 @@ func getPorts(d *schema.ResourceData) []int {
 	return ports
 }
 
-func isDcosFrameworkDeployComplete(d *schema.ResourceData, frameworkHostPort string) (bool, error) {
-	url := fmt.Sprintf("http://%s/%s", frameworkHostPort, d.Get("dcos_framework.plan_path"))
+func isDcosFrameworkDeployComplete(d *schema.ResourceData, frameworkURL string, dcosToken string) (bool, error) {
+	url := fmt.Sprintf("%s/%s", frameworkURL, d.Get("dcos_framework.0.plan_path"))
 
 	client := &http.Client{}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return false, err
 	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("token=%s", dcosToken))
 
 	resp, err := client.Do(req)
 	if err != nil {
