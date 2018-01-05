@@ -1806,10 +1806,18 @@ func isDcosFrameworkDeployComplete(d *schema.ResourceData, frameworkURL string, 
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		// The schedulure potentially isn't fully operational yet, try again later
+		log.Println("[DEBUG] DCOS framework schedulure didn't return a 2XX reponse, will try again later.")
+		return false, nil
+	}
+
 	data, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return false, err
 	}
+
+	log.Println("[DEBUG] Framework Plan JSON: " + fmt.Sprintf("%s", data))
 
 	var plan map[string]interface{}
 	err = json.Unmarshal([]byte(data), &plan)
