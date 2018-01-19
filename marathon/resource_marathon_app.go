@@ -128,6 +128,33 @@ func resourceMarathonApp() *schema.Resource {
 					},
 				},
 			},
+			// Marathon 1.5 has networks field
+			"networks": &schema.Schema{
+				Type:     schema.TypeList,
+				Optional: true,
+				ForceNew: false,
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						"network": &schema.Schema{
+							Type:     schema.TypeList,
+							Optional: true,
+							ForceNew: false,
+							Elem: &schema.Resource{
+								Schema: map[string]*schema.Schema{
+									"mode": &schema.Schema{
+										Type:     schema.TypeString,
+										Optional: true,
+									},
+									"name": &schema.Schema{
+										Type:     schema.TypeString,
+										Optional: true,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
 			"container": &schema.Schema{
 				Type:     schema.TypeList,
 				Optional: true,
@@ -149,7 +176,6 @@ func resourceMarathonApp() *schema.Resource {
 									},
 									"network": &schema.Schema{
 										Type:     schema.TypeString,
-										Default:  "HOST",
 										Optional: true,
 									},
 									"parameters": &schema.Schema{
@@ -291,6 +317,58 @@ func resourceMarathonApp() *schema.Resource {
 																Optional: true,
 															},
 														},
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+						// In Marathon 1.5 portMappings are moved from docker to container
+						"port_mappings": &schema.Schema{
+							Type:     schema.TypeList,
+							Optional: true,
+							ForceNew: false,
+							Elem: &schema.Resource{
+								Schema: map[string]*schema.Schema{
+									"port_mapping": &schema.Schema{
+										Type:     schema.TypeList,
+										Optional: true,
+										ForceNew: false,
+										Elem: &schema.Resource{
+											Schema: map[string]*schema.Schema{
+												"container_port": &schema.Schema{
+													Type:     schema.TypeInt,
+													Optional: true,
+												},
+												"host_port": &schema.Schema{
+													Type:     schema.TypeInt,
+													Optional: true,
+												},
+												"service_port": &schema.Schema{
+													Type:     schema.TypeInt,
+													Optional: true,
+												},
+												"protocol": &schema.Schema{
+													Type:     schema.TypeString,
+													Default:  "tcp",
+													Optional: true,
+												},
+												"labels": &schema.Schema{
+													Type:     schema.TypeMap,
+													Optional: true,
+												},
+												"name": &schema.Schema{
+													Type:     schema.TypeString,
+													Optional: true,
+												},
+												"network_names": &schema.Schema{
+													Type:     schema.TypeList,
+													Optional: true,
+													ForceNew: false,
+													Elem: &schema.Schema{
+														Type: schema.TypeString,
 													},
 												},
 											},
@@ -825,6 +903,30 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 		}
 	}
 
+	// Marathon 1.5 support for networks
+	if app.Networks != nil && len(*app.Networks) > 0 {
+		networks := make([]map[string]interface{}, len(*app.Networks))
+		for idx, network := range *app.Networks {
+			nMap := make(map[string]interface{})
+			if network.Mode != "" {
+				nMap["mode"] = network.Mode
+			}
+			if network.Name != "" {
+				nMap["name"] = network.Name
+			}
+			networks[idx] = nMap
+		}
+		err := d.Set("networks", &[]interface{}{map[string]interface{}{"network": networks}})
+
+		if err != nil {
+			return errors.New("Failed to set networks: " + err.Error())
+		}
+	} else {
+		d.Set("networks", nil)
+	}
+
+	d.SetPartial("health_checks")
+
 	if app.Container != nil {
 		container := app.Container
 
@@ -840,7 +942,10 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 			log.Println("DOCKERIMAGE: " + docker.Image)
 			dockerMap["force_pull_image"] = *docker.ForcePullImage
 
-			dockerMap["network"] = docker.Network
+			// Marathon 1.5 does not allow both docker.network and app.networks at the same config
+			if app.Networks == nil {
+				dockerMap["network"] = docker.Network
+			}
 			parameters := make([]map[string]string, len(*docker.Parameters))
 			for idx, p := range *docker.Parameters {
 				parameter := make(map[string]string, 2)
@@ -877,7 +982,6 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 			} else {
 				dockerMap["port_mappings"] = make([]interface{}, 0)
 			}
-
 		}
 
 		if len(*container.Volumes) > 0 {
@@ -910,6 +1014,33 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 			containerMap["volumes"] = []interface{}{map[string]interface{}{"volume": volumes}}
 		} else {
 			containerMap["volumes"] = nil
+		}
+
+		// Marathon 1.5 support for portMappings
+		if container.PortMappings != nil && len(*container.PortMappings) > 0 {
+			portMappings := make([]map[string]interface{}, len(*container.PortMappings))
+			for idx, portMapping := range *container.PortMappings {
+				pmMap := make(map[string]interface{})
+				pmMap["container_port"] = portMapping.ContainerPort
+				pmMap["host_port"] = portMapping.HostPort
+				_, ok := d.GetOk("container.0.port_mappings.0.port_mapping." + strconv.Itoa(idx) + ".service_port")
+				if ok {
+					pmMap["service_port"] = portMapping.ServicePort
+				}
+
+				pmMap["protocol"] = portMapping.Protocol
+				labels := make(map[string]string, len(*portMapping.Labels))
+				for k, v := range *portMapping.Labels {
+					labels[k] = v
+				}
+				pmMap["labels"] = labels
+				pmMap["name"] = portMapping.Name
+				if _, ok := d.GetOk("container.0.port_mappings.0.port_mapping." + strconv.Itoa(idx) + ".network_names.#"); ok {
+					pmMap["network_names"] = portMapping.NetworkNames
+				}
+				portMappings[idx] = pmMap
+			}
+			containerMap["port_mappings"] = []interface{}{map[string]interface{}{"port_mapping": portMappings}}
 		}
 
 		containerList := make([]interface{}, 1)
@@ -1331,6 +1462,22 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 		application = application.SetIPAddressPerTask(*ipAddressPerTask)
 	}
 
+	if v, ok := d.GetOk("networks.0.network.#"); ok {
+		networks := make([]marathon.Network, v.(int))
+
+		for i := range networks {
+			nMap := d.Get(fmt.Sprintf("networks.0.network.%d", i)).(map[string]interface{})
+
+			if val, ok := nMap["mode"].(string); ok {
+				networks[i].Mode = val
+			}
+			if val, ok := nMap["name"].(string); ok {
+				networks[i].Name = val
+			}
+		}
+		application.Networks = &networks
+	}
+
 	if v, ok := d.GetOk("container.0.type"); ok {
 		container := new(marathon.Container)
 		t := v.(string)
@@ -1463,6 +1610,49 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 				}
 			}
 			container.Volumes = &volumes
+		}
+
+		// Marathon 1.5 support for portMapping
+		if v, ok := d.GetOk("container.0.port_mappings.0.port_mapping.#"); ok {
+			portMappings := make([]marathon.PortMapping, v.(int))
+
+			for i := range portMappings {
+				portMapping := new(marathon.PortMapping)
+				portMappings[i] = *portMapping
+
+				pmMap := d.Get(fmt.Sprintf("container.0.port_mappings.0.port_mapping.%d", i)).(map[string]interface{})
+
+				if val, ok := pmMap["container_port"]; ok {
+					portMappings[i].ContainerPort = val.(int)
+				}
+				if val, ok := pmMap["host_port"]; ok {
+					portMappings[i].HostPort = val.(int)
+				}
+				if val, ok := pmMap["protocol"]; ok {
+					portMappings[i].Protocol = val.(string)
+				}
+				if val, ok := pmMap["service_port"]; ok {
+					portMappings[i].ServicePort = val.(int)
+				}
+				if val, ok := pmMap["name"]; ok {
+					portMappings[i].Name = val.(string)
+				}
+
+				labelsMap := d.Get(fmt.Sprintf("container.0.port_mappings.0.port_mapping.%d.labels", i)).(map[string]interface{})
+				labels := make(map[string]string, len(labelsMap))
+				for key, value := range labelsMap {
+					labels[key] = value.(string)
+				}
+				portMappings[i].Labels = &labels
+
+				netNamesList := d.Get(fmt.Sprintf("container.0.port_mappings.0.port_mapping.%d.network_names", i)).([]interface{})
+				netNames := make([]string, len(netNamesList))
+				for index, value := range netNamesList {
+					netNames[index] = value.(string)
+				}
+				portMappings[i].NetworkNames = &netNames
+			}
+			container.PortMappings = &portMappings
 		}
 
 		application.Container = container
