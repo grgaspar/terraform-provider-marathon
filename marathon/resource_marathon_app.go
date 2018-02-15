@@ -11,9 +11,9 @@ import (
 	"strconv"
 	"time"
 
-	cosmos "github.com/PTC-Global/dcos-sdk-go/cosmos/api/lib"
 	"github.com/gambol99/go-marathon"
 	"github.com/hashicorp/terraform/helper/schema"
+	cosmos "github.com/squeakysimple/dcos-sdk-go/cosmos/api/lib"
 )
 
 func resourceMarathonApp() *schema.Resource {
