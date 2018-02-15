@@ -13,6 +13,7 @@ import (
 
 	"github.com/gambol99/go-marathon"
 	"github.com/hashicorp/terraform/helper/schema"
+	cosmos "github.com/squeakysimple/dcos-sdk-go/cosmos/api/lib"
 )
 
 func resourceMarathonApp() *schema.Resource {
@@ -725,6 +726,44 @@ func waitOnSuccessfulDeployment(c chan deploymentEvent, id string, timeout time.
 	return nil
 }
 
+func waitOnDcosFrameworkDelete(d *schema.ResourceData, c config) error {
+	var frameworkURL string
+	packageName := d.Get("labels.DCOS_PACKAGE_NAME").(string)
+	frameworkName := d.Id()
+	packageInput := cosmos.UninstallPackageInput{}
+
+	packageInput.PackageName = packageName
+	packageInput.AppId = frameworkName
+
+	_, err := cosmos.UninstallPackage(c.config.DCOSToken, c.DcosURL, packageInput)
+	if err != nil {
+		return err
+	}
+
+	if c.DcosURL != "" {
+		frameworkURL = fmt.Sprintf("%s/service/%s", c.DcosURL, frameworkName)
+	} else {
+		return errors.New("dcos_url not supplied and is required if is_framework=true")
+	}
+
+	timeout := time.After(time.Duration(d.Get("dcos_framework.0.timeout").(int)) * time.Second)
+	tick := time.Tick(10 * time.Second)
+	for {
+		select {
+		case <-timeout:
+			return errors.New("framework deployment timeout reached")
+		case <-tick:
+			complete, err := isDcosFrameworkDeployComplete(d, frameworkURL, c.config.DCOSToken)
+			if err != nil {
+				return err
+			} else if complete {
+				return nil
+			}
+		}
+	}
+	return nil
+}
+
 func waitOnDcosFrameworkDeployment(d *schema.ResourceData, frameworkName string, c config) error {
 	var frameworkURL string
 
@@ -1370,12 +1409,19 @@ func resourceMarathonAppDelete(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(config)
 	client := config.Client
 
-	deploymentID, err := client.DeleteApplication(d.Id(), false)
-	if err != nil {
-		return err
+	if d.Get("dcos_framework.0.is_framework").(bool) {
+		err := waitOnDcosFrameworkDelete(d, config)
+		if err != nil {
+			log.Println("[ERROR] waiting for framework for uninstall", d.Id(), err)
+			return err
+		}
+	} else {
+		_, err := client.DeleteApplication(d.Id(), false)
+		if err != nil {
+			return err
+		}
 	}
-	err = client.WaitOnDeployment(deploymentID.DeploymentID, config.DefaultDeploymentTimeout)
-	return err
+	return nil
 }
 
 func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
