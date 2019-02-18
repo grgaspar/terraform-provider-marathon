@@ -1,13 +1,10 @@
 package marathon
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/hashicorp/terraform/helper/validation"
-	"io/ioutil"
 	"log"
-	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -15,7 +12,6 @@ import (
 
 	"github.com/gambol99/go-marathon"
 	"github.com/hashicorp/terraform/helper/schema"
-	cosmos "github.com/squeakysimple/dcos-sdk-go/cosmos/api/lib"
 )
 
 var legacyStringRegexp = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
@@ -97,26 +93,17 @@ func resourceMarathonApp() *schema.Resource {
 				ForceNew: false,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
-						"constraint": &schema.Schema{
-							Type:     schema.TypeList,
+						"attribute": {
+							Type:     schema.TypeString,
 							Optional: true,
-							ForceNew: false,
-							Elem: &schema.Resource{
-								Schema: map[string]*schema.Schema{
-									"attribute": {
-										Type:     schema.TypeString,
-										Optional: true,
-									},
-									"operation": {
-										Type:     schema.TypeString,
-										Optional: true,
-									},
-									"parameter": {
-										Type:     schema.TypeString,
-										Optional: true,
-									},
-								},
-							},
+						},
+						"operation": {
+							Type:     schema.TypeString,
+							Optional: true,
+						},
+						"parameter": {
+							Type:     schema.TypeString,
+							Optional: true,
 						},
 					},
 				},
@@ -591,70 +578,6 @@ func waitOnSuccessfulDeployment(c chan deploymentEvent, id string, timeout time.
 	return nil
 }
 
-func waitOnDcosFrameworkDelete(d *schema.ResourceData, c config) error {
-	var frameworkURL string
-	packageName := d.Get("labels.DCOS_PACKAGE_NAME").(string)
-	frameworkName := d.Id()
-	packageInput := cosmos.UninstallPackageInput{}
-
-	packageInput.PackageName = packageName
-	packageInput.AppId = frameworkName
-
-	_, err := cosmos.UninstallPackage(c.config.DCOSToken, c.DcosURL, packageInput)
-	if err != nil {
-		return err
-	}
-
-	if c.DcosURL != "" {
-		frameworkURL = fmt.Sprintf("%s/service/%s", c.DcosURL, frameworkName)
-	} else {
-		return errors.New("dcos_url not supplied and is required if is_framework=true")
-	}
-
-	timeout := time.After(time.Duration(d.Get("dcos_framework.0.timeout").(int)) * time.Second)
-	tick := time.Tick(10 * time.Second)
-	for {
-		select {
-		case <-timeout:
-			return errors.New("framework deployment timeout reached")
-		case <-tick:
-			complete, err := isDcosFrameworkDeployComplete(d, frameworkURL, c.config.DCOSToken)
-			if err != nil {
-				return err
-			} else if complete {
-				return nil
-			}
-		}
-	}
-	return nil
-}
-
-func waitOnDcosFrameworkDeployment(d *schema.ResourceData, frameworkName string, c config) error {
-	var frameworkURL string
-
-	if c.DcosURL != "" {
-		frameworkURL = fmt.Sprintf("%s/service/%s", c.DcosURL, frameworkName)
-	} else {
-		return errors.New("dcos_url not supplied and is required if is_framework=true")
-	}
-
-	timeout := time.After(time.Duration(d.Get("dcos_framework.0.timeout").(int)) * time.Second)
-	tick := time.Tick(10 * time.Second)
-	for {
-		select {
-		case <-timeout:
-			return errors.New("framework deployment timeout reached")
-		case <-tick:
-			complete, err := isDcosFrameworkDeployComplete(d, frameworkURL, c.config.DCOSToken)
-			if err != nil {
-				return err
-			} else if complete {
-				return nil
-			}
-		}
-	}
-}
-
 func resourceMarathonAppCreate(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(config)
 	client := config.Client
@@ -683,14 +606,6 @@ func resourceMarathonAppCreate(d *schema.ResourceData, meta interface{}) error {
 		err = waitOnSuccessfulDeployment(c, deploymentID.DeploymentID, config.DefaultDeploymentTimeout)
 		if err != nil {
 			log.Println("[ERROR] waiting for application for deployment", deploymentID, err)
-			return err
-		}
-	}
-
-	if d.Get("dcos_framework.0.is_framework").(bool) {
-		err = waitOnDcosFrameworkDeployment(d, application.ID, config)
-		if err != nil {
-			log.Println("[ERROR] waiting for framework for deployment", application.ID, err)
 			return err
 		}
 	}
@@ -784,8 +699,8 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 			}
 			cMaps[idx] = cMap
 		}
-		constraints := []interface{}{map[string]interface{}{"constraint": cMaps}}
-		err := d.Set("constraints", constraints)
+
+		err := d.Set("constraints", cMaps)
 
 		if err != nil {
 			return errors.New("Failed to set contraints: " + err.Error())
@@ -1175,13 +1090,6 @@ func resourceMarathonAppUpdate(d *schema.ResourceData, meta interface{}) error {
 		return err
 	}
 
-	if d.Get("dcos_framework.0.is_framework").(bool) {
-		err = waitOnDcosFrameworkDeployment(d, application.ID, config)
-		if err != nil {
-			log.Println("[ERROR] waiting for framework for deployment", application.ID, err)
-			return err
-		}
-	}
 	return nil
 }
 
@@ -1189,18 +1097,11 @@ func resourceMarathonAppDelete(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(config)
 	client := config.Client
 
-	if d.Get("dcos_framework.0.is_framework").(bool) {
-		err := waitOnDcosFrameworkDelete(d, config)
-		if err != nil {
-			log.Println("[ERROR] waiting for framework for uninstall", d.Id(), err)
-			return err
-		}
-	} else {
-		_, err := client.DeleteApplication(d.Id(), false)
-		if err != nil {
-			return err
-		}
+	_, err := client.DeleteApplication(d.Id(), false)
+	if err != nil {
+		return err
 	}
+
 	return nil
 }
 
@@ -1250,11 +1151,11 @@ func mapResourceToApplication(d *schema.ResourceData) *marathon.Application {
 		application.Cmd = &value
 	}
 
-	if v, ok := d.GetOk("constraints.0.constraint.#"); ok {
+	if v, ok := d.GetOk("constraints.#"); ok {
 		constraints := make([][]string, v.(int))
 
 		for i := range constraints {
-			cMap := d.Get(fmt.Sprintf("constraints.0.constraint.%d", i)).(map[string]interface{})
+			cMap := d.Get(fmt.Sprintf("constraints.%d", i)).(map[string]interface{})
 
 			if cMap["parameter"] == "" {
 				constraints[i] = make([]string, 2)
@@ -1700,48 +1601,4 @@ func mapResourceToApplication(d *schema.ResourceData) *marathon.Application {
 	}
 
 	return application
-}
-
-func isDcosFrameworkDeployComplete(d *schema.ResourceData, frameworkURL string, dcosToken string) (bool, error) {
-	url := fmt.Sprintf("%s/%s", frameworkURL, d.Get("dcos_framework.0.plan_path"))
-
-	client := &http.Client{}
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return false, err
-	}
-
-	req.Header.Set("Authorization", fmt.Sprintf("token=%s", dcosToken))
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return false, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		// The schedulure potentially isn't fully operational yet, try again later
-		log.Println("[DEBUG] DCOS framework schedulure didn't return a 2XX reponse, will try again later.")
-		return false, nil
-	}
-
-	data, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return false, err
-	}
-
-	log.Println("[DEBUG] Framework Plan JSON: " + fmt.Sprintf("%s", data))
-
-	var plan map[string]interface{}
-	err = json.Unmarshal([]byte(data), &plan)
-	if err != nil {
-		err = errors.New("failed json unmarshal")
-		return false, err
-	}
-
-	status := plan["status"].(string)
-	if status == "COMPLETE" {
-		return true, nil
-	}
-	return false, nil
 }

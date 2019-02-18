@@ -44,18 +44,6 @@ func Provider() terraform.ResourceProvider {
 				Default:     "",
 				Description: "HTTP basic auth password",
 			},
-			"dcos_token": &schema.Schema{
-				Type:        schema.TypeString,
-				Optional:    true,
-				Default:     "",
-				Description: "DCOS token",
-			},
-			"dcos_url": &schema.Schema{
-				Type:        schema.TypeString,
-				Optional:    true,
-				Default:     "",
-				Description: "DCOS URL",
-			},
 			"log_output": &schema.Schema{
 				Type:        schema.TypeBool,
 				Optional:    true,
@@ -82,14 +70,13 @@ func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 
 	marathonConfig.HTTPBasicAuthUser = d.Get("basic_auth_user").(string)
 	marathonConfig.HTTPBasicPassword = d.Get("basic_auth_password").(string)
-	marathonConfig.DCOSToken = d.Get("dcos_token").(string)
 	if d.Get("log_output").(bool) {
 		marathonConfig.LogOutput = logWriter{}
 	}
 	marathonConfig.EventsTransport = marathon.EventsTransportSSE
 
 	marathonConfig.HTTPClient = &http.Client{
-		Timeout: (time.Duration(d.Get("deployment_timeout").(int)) * time.Second),
+		Timeout: time.Duration(d.Get("deployment_timeout").(int)) * time.Second,
 	}
 
 	marathonConfig.HTTPSSEClient = &http.Client{}
@@ -97,7 +84,6 @@ func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 	config := config{
 		config: marathonConfig,
 		DefaultDeploymentTimeout: time.Duration(d.Get("deployment_timeout").(int)) * time.Second,
-		DcosURL:                  d.Get("dcos_url").(string),
 	}
 
 	log.Printf("Configured: %#v", config)

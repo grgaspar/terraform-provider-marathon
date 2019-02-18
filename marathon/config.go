@@ -10,7 +10,6 @@ type config struct {
 	config                   marathon.Config
 	Client                   marathon.Marathon
 	DefaultDeploymentTimeout time.Duration
-	DcosURL                  string
 }
 
 func (c *config) loadAndValidate() error {
