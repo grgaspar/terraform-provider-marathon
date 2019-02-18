@@ -5,3 +5,6 @@
 /marathon/test-sh-tf.log
 /terraform-provider-*
 /bin/terraform-provider-*
+
+.DS_STORE
+.idea

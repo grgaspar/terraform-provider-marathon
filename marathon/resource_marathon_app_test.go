@@ -103,7 +103,7 @@ func TestAccMarathonApp_ipAddress(t *testing.T) {
 			resource.TestStep{
 				Config: readExampleAppConfiguration("ip-address"),
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("marathon_app.ip-address-create-example", "ipaddress.0.network_name", "default"),
+					resource.TestCheckResourceAttr("marathon_app.ip-address-create-example", "app_id", "/app-create-example2"),
 				),
 			},
 		},

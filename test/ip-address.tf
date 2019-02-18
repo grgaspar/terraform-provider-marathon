@@ -1,5 +1,5 @@
 resource "marathon_app" "ip-address-create-example" {
-  app_id = "/app-create-example"
+  app_id = "/app-create-example2"
   cmd = "env && python3 -m http.server 8080"
   cpus = 0.01
   instances = 1
@@ -8,42 +8,46 @@ resource "marathon_app" "ip-address-create-example" {
   container {
     docker {
       image = "python:3"
-      network = "BRIDGE"
-      parameters {
-        parameter {
+      parameters = [
+        {
           key = "hostname"
           value = "a.corp.org"
         }
-      }
-      port_mappings {
-        port_mapping {
-          container_port = 8080
-          host_port = 0
-          protocol = "tcp"
-          labels {
-            VIP_0 = "test:8080"
-          }
-        }
-        port_mapping {
-          container_port = 161
-          host_port = 0
-          protocol = "udp"
-        }
-      }
+      ]
     }
 
-    volumes {
-      volume {
+    port_mappings = [
+      {
+        container_port = 8080
+        host_port = 0
+        protocol = "tcp"
+        labels {
+          VIP_0 = "test:8080"
+        }
+      },
+      {
+        container_port = 161
+        host_port = 0
+        protocol = "udp"
+      }
+    ]
+
+    volumes = [
+      {
         container_path = "/etc/a"
         host_path = "/var/data/a"
         mode = "RO"
-      }
-      volume {
+      },
+      {
         container_path = "/etc/b"
         host_path = "/var/data/b"
         mode = "RW"
       }
-    }
+    ]
+  }
+
+  networks {
+    mode = "CONTAINER/BRIDGE"
   }
 
   env {
@@ -51,33 +55,19 @@ resource "marathon_app" "ip-address-create-example" {
     OTHER_TEST = "nope"
   }
 
-  health_checks {
-     health_check {
+  health_checks = [
+     {
        command {
          value = "ps aux |grep python"
        }
        max_consecutive_failures = 0
        protocol = "COMMAND"
      }
-  }
-
-  ipaddress {
-    network_name = "default"
-  }
+  ]
 
   kill_selection = "OLDEST_FIRST"
 
   labels {
     test = "abc"
-  }
-
-  upgrade_strategy {
-    minimum_health_capacity = 0.5
-    maximum_over_capacity = 0.3
-  }
-
-  unreachable_strategy {
-    inactive_after_seconds = 60
-    expunge_after_seconds = 120
   }
 }

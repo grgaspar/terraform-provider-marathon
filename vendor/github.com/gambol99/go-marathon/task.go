@@ -69,6 +69,7 @@ type KillApplicationTasksOpts struct {
 type KillTaskOpts struct {
 	Scale bool `url:"scale,omitempty"`
 	Force bool `url:"force,omitempty"`
+	Wipe  bool `url:"wipe,omitempty"`
 }
 
 // HasHealthCheckResults checks if the task has any health checks
@@ -220,7 +221,7 @@ func (r *Task) allHealthChecksAlive() bool {
 	}
 	// step: check the health results then
 	for _, check := range r.HealthCheckResults {
-		if check.Alive == false {
+		if !check.Alive {
 			return false
 		}
 	}

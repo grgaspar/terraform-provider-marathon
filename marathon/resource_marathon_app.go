@@ -4,17 +4,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/hashicorp/terraform/helper/validation"
 	"io/ioutil"
 	"log"
 	"net/http"
-	"reflect"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gambol99/go-marathon"
 	"github.com/hashicorp/terraform/helper/schema"
 	cosmos "github.com/squeakysimple/dcos-sdk-go/cosmos/api/lib"
 )
+
+var legacyStringRegexp = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
 func resourceMarathonApp() *schema.Resource {
 	return &schema.Resource{
@@ -99,54 +103,15 @@ func resourceMarathonApp() *schema.Resource {
 							ForceNew: false,
 							Elem: &schema.Resource{
 								Schema: map[string]*schema.Schema{
-									"attribute": &schema.Schema{
+									"attribute": {
 										Type:     schema.TypeString,
 										Optional: true,
 									},
-									"operation": &schema.Schema{
+									"operation": {
 										Type:     schema.TypeString,
 										Optional: true,
 									},
-									"parameter": &schema.Schema{
-										Type:     schema.TypeString,
-										Optional: true,
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-			"ipaddress": &schema.Schema{
-				Type:     schema.TypeList,
-				Optional: true,
-				Elem: &schema.Resource{
-					Schema: map[string]*schema.Schema{
-						"network_name": &schema.Schema{
-							Type:     schema.TypeString,
-							Optional: true,
-						},
-					},
-				},
-			},
-			// Marathon 1.5 has networks field
-			"networks": &schema.Schema{
-				Type:     schema.TypeList,
-				Optional: true,
-				ForceNew: false,
-				Elem: &schema.Resource{
-					Schema: map[string]*schema.Schema{
-						"network": &schema.Schema{
-							Type:     schema.TypeList,
-							Optional: true,
-							ForceNew: false,
-							Elem: &schema.Resource{
-								Schema: map[string]*schema.Schema{
-									"mode": &schema.Schema{
-										Type:     schema.TypeString,
-										Optional: true,
-									},
-									"name": &schema.Schema{
+									"parameter": {
 										Type:     schema.TypeString,
 										Optional: true,
 									},
@@ -167,90 +132,34 @@ func resourceMarathonApp() *schema.Resource {
 							Optional: true,
 							Elem: &schema.Resource{
 								Schema: map[string]*schema.Schema{
-									"force_pull_image": &schema.Schema{
+									"force_pull_image": {
 										Type:     schema.TypeBool,
 										Optional: true,
 									},
-									"image": &schema.Schema{
+									"image": {
 										Type:     schema.TypeString,
 										Required: true,
 									},
-									"network": &schema.Schema{
-										Type:     schema.TypeString,
-										Optional: true,
-									},
-									"parameters": &schema.Schema{
+									"parameters": {
 										Type:     schema.TypeList,
 										Optional: true,
 										ForceNew: false,
 										Elem: &schema.Resource{
 											Schema: map[string]*schema.Schema{
-												"parameter": &schema.Schema{
-													Type:     schema.TypeList,
+												"key": {
+													Type:     schema.TypeString,
 													Optional: true,
-													ForceNew: false,
-													Elem: &schema.Resource{
-														Schema: map[string]*schema.Schema{
-															"key": &schema.Schema{
-																Type:     schema.TypeString,
-																Optional: true,
-															},
-															"value": &schema.Schema{
-																Type:     schema.TypeString,
-																Optional: true,
-															},
-														},
-													},
+												},
+												"value": {
+													Type:     schema.TypeString,
+													Optional: true,
 												},
 											},
 										},
 									},
-									"privileged": &schema.Schema{
+									"privileged": {
 										Type:     schema.TypeBool,
 										Optional: true,
-									},
-									"port_mappings": &schema.Schema{
-										Type:     schema.TypeList,
-										Optional: true,
-										ForceNew: false,
-										Elem: &schema.Resource{
-											Schema: map[string]*schema.Schema{
-												"port_mapping": &schema.Schema{
-													Type:     schema.TypeList,
-													Optional: true,
-													ForceNew: false,
-													Elem: &schema.Resource{
-														Schema: map[string]*schema.Schema{
-															"container_port": &schema.Schema{
-																Type:     schema.TypeInt,
-																Optional: true,
-															},
-															"host_port": &schema.Schema{
-																Type:     schema.TypeInt,
-																Optional: true,
-															},
-															"service_port": &schema.Schema{
-																Type:     schema.TypeInt,
-																Optional: true,
-															},
-															"protocol": &schema.Schema{
-																Type:     schema.TypeString,
-																Default:  "tcp",
-																Optional: true,
-															},
-															"labels": &schema.Schema{
-																Type:     schema.TypeMap,
-																Optional: true,
-															},
-															"name": &schema.Schema{
-																Type:     schema.TypeString,
-																Optional: true,
-															},
-														},
-													},
-												},
-											},
-										},
 									},
 								},
 							},
@@ -261,64 +170,55 @@ func resourceMarathonApp() *schema.Resource {
 							ForceNew: false,
 							Elem: &schema.Resource{
 								Schema: map[string]*schema.Schema{
-									"volume": &schema.Schema{
+									"container_path": {
+										Type:     schema.TypeString,
+										Optional: true,
+									},
+									"host_path": {
+										Type:     schema.TypeString,
+										Optional: true,
+									},
+									"mode": {
+										Type:     schema.TypeString,
+										Optional: true,
+									},
+									"external": {
 										Type:     schema.TypeList,
 										Optional: true,
-										ForceNew: false,
 										Elem: &schema.Resource{
 											Schema: map[string]*schema.Schema{
-												"container_path": &schema.Schema{
+												"options": {
+													Type:     schema.TypeMap,
+													Optional: true,
+												},
+												"name": {
 													Type:     schema.TypeString,
 													Optional: true,
 												},
-												"host_path": &schema.Schema{
+												"provider": {
 													Type:     schema.TypeString,
 													Optional: true,
 												},
-												"mode": &schema.Schema{
+											},
+										},
+									},
+									"persistent": {
+										Type:     schema.TypeList,
+										Optional: true,
+										Elem: &schema.Resource{
+											Schema: map[string]*schema.Schema{
+												"type": {
 													Type:     schema.TypeString,
 													Optional: true,
+													Default:  "root",
 												},
-												"external": &schema.Schema{
-													Type:     schema.TypeList,
+												"size": {
+													Type:     schema.TypeInt,
 													Optional: true,
-													Elem: &schema.Resource{
-														Schema: map[string]*schema.Schema{
-															"options": &schema.Schema{
-																Type:     schema.TypeMap,
-																Optional: true,
-															},
-															"name": &schema.Schema{
-																Type:     schema.TypeString,
-																Optional: true,
-															},
-															"provider": &schema.Schema{
-																Type:     schema.TypeString,
-																Optional: true,
-															},
-														},
-													},
 												},
-												"persistent": &schema.Schema{
-													Type:     schema.TypeList,
+												"max_size": {
+													Type:     schema.TypeInt,
 													Optional: true,
-													Elem: &schema.Resource{
-														Schema: map[string]*schema.Schema{
-															"type": &schema.Schema{
-																Type:     schema.TypeString,
-																Optional: true,
-																Default:  "root",
-															},
-															"size": &schema.Schema{
-																Type:     schema.TypeInt,
-																Optional: true,
-															},
-															"max_size": &schema.Schema{
-																Type:     schema.TypeInt,
-																Optional: true,
-															},
-														},
-													},
 												},
 											},
 										},
@@ -326,53 +226,43 @@ func resourceMarathonApp() *schema.Resource {
 								},
 							},
 						},
-						// In Marathon 1.5 portMappings are moved from docker to container
 						"port_mappings": &schema.Schema{
 							Type:     schema.TypeList,
 							Optional: true,
 							ForceNew: false,
 							Elem: &schema.Resource{
 								Schema: map[string]*schema.Schema{
-									"port_mapping": &schema.Schema{
+									"container_port": {
+										Type:     schema.TypeInt,
+										Optional: true,
+									},
+									"host_port": {
+										Type:     schema.TypeInt,
+										Optional: true,
+									},
+									"service_port": {
+										Type:     schema.TypeInt,
+										Optional: true,
+									},
+									"protocol": {
+										Type:     schema.TypeString,
+										Default:  "tcp",
+										Optional: true,
+									},
+									"labels": {
+										Type:     schema.TypeMap,
+										Optional: true,
+									},
+									"name": {
+										Type:     schema.TypeString,
+										Optional: true,
+									},
+									"network_names": {
 										Type:     schema.TypeList,
 										Optional: true,
 										ForceNew: false,
-										Elem: &schema.Resource{
-											Schema: map[string]*schema.Schema{
-												"container_port": &schema.Schema{
-													Type:     schema.TypeInt,
-													Optional: true,
-												},
-												"host_port": &schema.Schema{
-													Type:     schema.TypeInt,
-													Optional: true,
-												},
-												"service_port": &schema.Schema{
-													Type:     schema.TypeInt,
-													Optional: true,
-												},
-												"protocol": &schema.Schema{
-													Type:     schema.TypeString,
-													Default:  "tcp",
-													Optional: true,
-												},
-												"labels": &schema.Schema{
-													Type:     schema.TypeMap,
-													Optional: true,
-												},
-												"name": &schema.Schema{
-													Type:     schema.TypeString,
-													Optional: true,
-												},
-												"network_names": &schema.Schema{
-													Type:     schema.TypeList,
-													Optional: true,
-													ForceNew: false,
-													Elem: &schema.Schema{
-														Type: schema.TypeString,
-													},
-												},
-											},
+										Elem: &schema.Schema{
+											Type: schema.TypeString,
 										},
 									},
 								},
@@ -393,7 +283,7 @@ func resourceMarathonApp() *schema.Resource {
 				ForceNew: false,
 			},
 			"gpus": &schema.Schema{
-				Type:     schema.TypeFloat,
+				Type:     schema.TypeInt,
 				Optional: true,
 				Default:  0,
 				ForceNew: false,
@@ -408,9 +298,7 @@ func resourceMarathonApp() *schema.Resource {
 				Type:     schema.TypeList,
 				Optional: true,
 				ForceNew: false,
-				Elem: &schema.Schema{
-					Type: schema.TypeString,
-				},
+				Elem: &schema.Schema{ Type: schema.TypeString },
 			},
 			"env": &schema.Schema{
 				Type:     schema.TypeMap,
@@ -423,21 +311,21 @@ func resourceMarathonApp() *schema.Resource {
 				ForceNew: false,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
-						"uri": &schema.Schema{
+						"uri": {
 							Type:     schema.TypeString,
 							Optional: true,
 						},
-						"cache": &schema.Schema{
+						"cache": {
 							Type:     schema.TypeBool,
 							Optional: true,
 							Default:  false,
 						},
-						"executable": &schema.Schema{
+						"executable": {
 							Type:     schema.TypeBool,
 							Optional: true,
 							Default:  false,
 						},
-						"extract": &schema.Schema{
+						"extract": {
 							Type:     schema.TypeBool,
 							Optional: true,
 							Default:  true,
@@ -451,70 +339,64 @@ func resourceMarathonApp() *schema.Resource {
 				ForceNew: false,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
-						"health_check": &schema.Schema{
+						"command": {
 							Type:     schema.TypeList,
 							Optional: true,
 							ForceNew: false,
 							Elem: &schema.Resource{
 								Schema: map[string]*schema.Schema{
-									"protocol": &schema.Schema{
-										Type:     schema.TypeString,
-										Default:  "HTTP",
-										Optional: true,
-									},
-									"path": &schema.Schema{
+									"value": {
 										Type:     schema.TypeString,
 										Optional: true,
 									},
-									"grace_period_seconds": &schema.Schema{
-										Type:     schema.TypeInt,
-										Default:  300,
-										Optional: true,
-									},
-									"interval_seconds": &schema.Schema{
-										Type:     schema.TypeInt,
-										Default:  60,
-										Optional: true,
-									},
-									"port_index": &schema.Schema{
-										Type:     schema.TypeInt,
-										Default:  0,
-										Optional: true,
-									},
-									"port": &schema.Schema{
-										Type:     schema.TypeInt,
-										Optional: true,
-									},
-									"timeout_seconds": &schema.Schema{
-										Type:     schema.TypeInt,
-										Default:  20,
-										Optional: true,
-									},
-									"ignore_http_1xx": &schema.Schema{
-										Type:     schema.TypeBool,
-										Optional: true,
-									},
-									"max_consecutive_failures": &schema.Schema{
-										Type:     schema.TypeInt,
-										Default:  3,
-										Optional: true,
-									},
-									"command": &schema.Schema{
-										Type:     schema.TypeList,
-										Optional: true,
-										ForceNew: false,
-										Elem: &schema.Resource{
-											Schema: map[string]*schema.Schema{
-												"value": &schema.Schema{
-													Type:     schema.TypeString,
-													Optional: true,
-												},
-											},
-										},
-									},
-									// incomplete computed values here
 								},
 							},
+						},
+						"protocol": {
+							Type:     schema.TypeString,
+							Default:  "HTTP",
+							Optional: true,
+						},
+						"path": {
+							Type:     schema.TypeString,
+							Optional: true,
+						},
+						"grace_period_seconds": {
+							Type:     schema.TypeInt,
+							Default:  300,
+							Optional: true,
+						},
+						"interval_seconds": {
+							Type:     schema.TypeInt,
+							Default:  60,
+							Optional: true,
+						},
+						"port_index": {
+							Type:     schema.TypeInt,
+							Default:  0,
+							Optional: true,
+						},
+						"port": {
+							Type:     schema.TypeInt,
+							Optional: true,
+						},
+						"timeout_seconds": {
+							Type:     schema.TypeInt,
+							Default:  20,
+							Optional: true,
+						},
+						"ignore_http_1xx": {
+							Type:     schema.TypeBool,
+							Optional: true,
+						},
+						"max_consecutive_failures": {
+							Type:     schema.TypeInt,
+							Default:  3,
+							Optional: true,
+						},
+						"delay_seconds" : {
+							Type: schema.TypeInt,
+							Optional: true,
 						},
 					},
 				},
@@ -539,15 +421,31 @@ func resourceMarathonApp() *schema.Resource {
 			"max_launch_delay_seconds": &schema.Schema{
 				Type:     schema.TypeFloat,
 				Optional: true,
-				Default:  3600,
+				Default:  300,
 				ForceNew: false,
 			},
-			"ports": &schema.Schema{
+			"networks": &schema.Schema{
 				Type:     schema.TypeList,
 				Optional: true,
-				ForceNew: false,
-				Elem: &schema.Schema{
-					Type: schema.TypeInt,
+				MaxItems: 1,
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						"name": {
+							Type:     schema.TypeString,
+							Optional: true,
+						},
+						"mode": {
+							Type: schema.TypeString,
+							Required: true,
+							ValidateFunc: validation.StringInSlice([]string{"CONTAINER", "CONTAINER/BRIDGE", "HOST"}, false),
+						},
+						"labels": {
+							Type: schema.TypeMap,
+							Optional: true,
+							Elem: &schema.Schema{Type: schema.TypeString},
+							Set: schema.HashString,
+						},
+					},
 				},
 			},
 			"require_ports": &schema.Schema{
@@ -562,90 +460,65 @@ func resourceMarathonApp() *schema.Resource {
 				ForceNew: false,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
-						"port_definition": &schema.Schema{
-							Type:     schema.TypeList,
-							Optional: true,
-							ForceNew: false,
-							Elem: &schema.Resource{
-								Schema: map[string]*schema.Schema{
-									"protocol": &schema.Schema{
-										Type:     schema.TypeString,
-										Default:  "tcp",
-										Optional: true,
-									},
-									"port": &schema.Schema{
-										Type:     schema.TypeInt,
-										Optional: true,
-									},
-									"name": &schema.Schema{
-										Type:     schema.TypeString,
-										Optional: true,
-									},
-									"labels": &schema.Schema{
-										Type:     schema.TypeMap,
-										Optional: true,
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-			"residency": &schema.Schema{
-				Type:     schema.TypeList,
-				Optional: true,
-				ForceNew: false,
-				Elem: &schema.Resource{
-					Schema: map[string]*schema.Schema{
-						"task_lost_behavior": &schema.Schema{
+						"protocol": {
 							Type:     schema.TypeString,
+							Default:  "tcp",
 							Optional: true,
 						},
-						"relaunch_escalation_timeout_seconds": &schema.Schema{
+						"port": {
 							Type:     schema.TypeInt,
 							Optional: true,
 						},
-					},
-				},
-			},
-			"upgrade_strategy": &schema.Schema{
-				Type:     schema.TypeList,
-				Optional: true,
-				ForceNew: false,
-				Elem: &schema.Resource{
-					Schema: map[string]*schema.Schema{
-						"minimum_health_capacity": &schema.Schema{
-							Type:     schema.TypeFloat,
+						"name": {
+							Type:     schema.TypeString,
 							Optional: true,
-							Default:  1.0,
+							ValidateFunc: validation.StringMatch(legacyStringRegexp, "Invalid name"),
 						},
-						"maximum_over_capacity": &schema.Schema{
-							Type:     schema.TypeFloat,
+						"labels": {
+							Type:     schema.TypeMap,
 							Optional: true,
-							Default:  1.0,
 						},
 					},
 				},
 			},
-			"unreachable_strategy": &schema.Schema{
-				Type:     schema.TypeList,
-				Optional: true,
-				ForceNew: false,
-				Elem: &schema.Resource{
-					Schema: map[string]*schema.Schema{
-						"inactive_after_seconds": &schema.Schema{
-							Type:     schema.TypeFloat,
-							Optional: true,
-							Default:  300.0,
-						},
-						"expunge_after_seconds": &schema.Schema{
-							Type:     schema.TypeFloat,
-							Optional: true,
-							Default:  600.0,
-						},
-					},
-				},
-			},
+			//"upgrade_strategy": &schema.Schema{
+			//	Type:     schema.TypeList,
+			//	Optional: true,
+			//	ForceNew: false,
+			//	Elem: &schema.Resource{
+			//		Schema: map[string]*schema.Schema{
+			//			"minimum_health_capacity": {
+			//				Type:     schema.TypeFloat,
+			//				Optional: true,
+			//				Computed: true,
+			//			},
+			//			"maximum_over_capacity": {
+			//				Type:     schema.TypeFloat,
+			//				Optional: true,
+			//				Computed: true,
+			//			},
+			//		},
+			//	},
+			//},
+			//"unreachable_strategy": &schema.Schema{
+			//	Type:     schema.TypeList,
+			//	Optional: true,
+			//	ForceNew: false,
+			//	Elem: &schema.Resource{
+			//		Schema: map[string]*schema.Schema{
+			//			"inactive_after_seconds": {
+			//				Type:     schema.TypeInt,
+			//				Optional: true,
+			//				Computed: true,
+			//			},
+			//			"expunge_after_seconds": {
+			//				Type:     schema.TypeInt,
+			//				Optional: true,
+			//				Computed: true,
+			//			},
+			//		},
+			//	},
+			//},
 			"kill_selection": &schema.Schema{
 				Type:     schema.TypeString,
 				Optional: true,
@@ -656,14 +529,6 @@ func resourceMarathonApp() *schema.Resource {
 				Type:     schema.TypeString,
 				Optional: true,
 				ForceNew: false,
-			},
-			"uris": &schema.Schema{
-				Type:     schema.TypeList,
-				Optional: true,
-				ForceNew: false,
-				Elem: &schema.Schema{
-					Type: schema.TypeString,
-				},
 			},
 			"executor": &schema.Schema{
 				Type:     schema.TypeString,
@@ -803,7 +668,7 @@ func resourceMarathonAppCreate(d *schema.ResourceData, meta interface{}) error {
 		return errors.New("Timeout getting an EventListener")
 	}
 
-	application := mutateResourceToApplication(d)
+	application := mapResourceToApplication(d)
 
 	application, err := client.CreateApplication(application)
 	if err != nil {
@@ -930,32 +795,19 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 	}
 	d.SetPartial("constraints")
 
-	if app.IPAddressPerTask != nil {
-		ipAddress := app.IPAddressPerTask
-
-		ipAddressMap := make(map[string]interface{})
-		ipAddressMap["network_name"] = ipAddress.NetworkName
-		err := d.Set("ipaddress", &[]interface{}{ipAddressMap})
-
-		if err != nil {
-			return errors.New("Failed to set ip address per task: " + err.Error())
-		}
-	}
-
-	// Marathon 1.5 support for networks
 	if app.Networks != nil && len(*app.Networks) > 0 {
 		networks := make([]map[string]interface{}, len(*app.Networks))
 		for idx, network := range *app.Networks {
 			nMap := make(map[string]interface{})
 			if network.Mode != "" {
-				nMap["mode"] = network.Mode
+				nMap["mode"] = strings.ToUpper(string(network.Mode))
 			}
 			if network.Name != "" {
 				nMap["name"] = network.Name
 			}
 			networks[idx] = nMap
 		}
-		err := d.Set("networks", &[]interface{}{map[string]interface{}{"network": networks}})
+		err := d.Set("networks", networks)
 
 		if err != nil {
 			return errors.New("Failed to set networks: " + err.Error())
@@ -985,6 +837,7 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 			if app.Networks == nil {
 				dockerMap["network"] = docker.Network
 			}
+
 			parameters := make([]map[string]string, len(*docker.Parameters))
 			for idx, p := range *docker.Parameters {
 				parameter := make(map[string]string, 2)
@@ -992,35 +845,12 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 				parameter["value"] = p.Value
 				parameters[idx] = parameter
 			}
+
 			if len(*docker.Parameters) > 0 {
-				dockerMap["parameters"] = []interface{}{map[string]interface{}{"parameter": parameters}}
+				dockerMap["parameters"] = parameters
 			}
+
 			dockerMap["privileged"] = *docker.Privileged
-
-			if docker.PortMappings != nil && len(*docker.PortMappings) > 0 {
-				portMappings := make([]map[string]interface{}, len(*docker.PortMappings))
-				for idx, portMapping := range *docker.PortMappings {
-					pmMap := make(map[string]interface{})
-					pmMap["container_port"] = portMapping.ContainerPort
-					pmMap["host_port"] = portMapping.HostPort
-					_, ok := d.GetOk("container.0.docker.0.port_mappings.0.port_mapping." + strconv.Itoa(idx) + ".service_port")
-					if ok {
-						pmMap["service_port"] = portMapping.ServicePort
-					}
-
-					pmMap["protocol"] = portMapping.Protocol
-					labels := make(map[string]string, len(*portMapping.Labels))
-					for k, v := range *portMapping.Labels {
-						labels[k] = v
-					}
-					pmMap["labels"] = labels
-					pmMap["name"] = portMapping.Name
-					portMappings[idx] = pmMap
-				}
-				dockerMap["port_mappings"] = []interface{}{map[string]interface{}{"port_mapping": portMappings}}
-			} else {
-				dockerMap["port_mappings"] = make([]interface{}, 0)
-			}
 		}
 
 		if len(*container.Volumes) > 0 {
@@ -1030,6 +860,7 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 				volumeMap["container_path"] = volume.ContainerPath
 				volumeMap["host_path"] = volume.HostPath
 				volumeMap["mode"] = volume.Mode
+
 				if volume.External != nil {
 					external := make(map[string]interface{})
 					external["name"] = volume.External.Name
@@ -1048,21 +879,22 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 					persistents[0] = persistent
 					volumeMap["persistent"] = persistents
 				}
+
 				volumes[idx] = volumeMap
 			}
-			containerMap["volumes"] = []interface{}{map[string]interface{}{"volume": volumes}}
+
+			containerMap["volumes"] = volumes
 		} else {
 			containerMap["volumes"] = nil
 		}
 
-		// Marathon 1.5 support for portMappings
 		if container.PortMappings != nil && len(*container.PortMappings) > 0 {
 			portMappings := make([]map[string]interface{}, len(*container.PortMappings))
 			for idx, portMapping := range *container.PortMappings {
 				pmMap := make(map[string]interface{})
 				pmMap["container_port"] = portMapping.ContainerPort
 				pmMap["host_port"] = portMapping.HostPort
-				_, ok := d.GetOk("container.0.port_mappings.0.port_mapping." + strconv.Itoa(idx) + ".service_port")
+				_, ok := d.GetOk("container.0.port_mappings." + strconv.Itoa(idx) + ".service_port")
 				if ok {
 					pmMap["service_port"] = portMapping.ServicePort
 				}
@@ -1074,12 +906,13 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 				}
 				pmMap["labels"] = labels
 				pmMap["name"] = portMapping.Name
-				if _, ok := d.GetOk("container.0.port_mappings.0.port_mapping." + strconv.Itoa(idx) + ".network_names.#"); ok {
+				if _, ok := d.GetOk("container.0.port_mappings." + strconv.Itoa(idx) + ".network_names.#"); ok {
 					pmMap["network_names"] = portMapping.NetworkNames
 				}
 				portMappings[idx] = pmMap
 			}
-			containerMap["port_mappings"] = []interface{}{map[string]interface{}{"port_mapping": portMappings}}
+
+			containerMap["port_mappings"] = portMappings
 		}
 
 		containerList := make([]interface{}, 1)
@@ -1129,13 +962,6 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 
 	d.SetPartial("env")
 
-	// err = d.Set("fetch", app.Fetch)
-	// if err != nil {
-	// 	return errors.New("Failed to set fetch: " + err.Error())
-	// }
-
-	// d.SetPartial("fetch")
-
 	if app.Fetch != nil && len(*app.Fetch) > 0 {
 		fetches := make([]map[string]interface{}, len(*app.Fetch))
 		for i, fetch := range *app.Fetch {
@@ -1153,12 +979,6 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 		}
 	} else {
 		d.Set("fetch", nil)
-
-		err = d.Set("uris", app.Uris)
-		if err != nil {
-			return errors.New("Failed to set uris: " + err.Error())
-		}
-		d.SetPartial("uris")
 	}
 
 	d.SetPartial("fetch")
@@ -1187,11 +1007,13 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 			if healthCheck.Port != nil {
 				hMap["port"] = *healthCheck.Port
 			}
+
 			hMap["protocol"] = healthCheck.Protocol
 			hMap["timeout_seconds"] = healthCheck.TimeoutSeconds
 			healthChecks[idx] = hMap
 		}
-		err := d.Set("health_checks", &[]interface{}{map[string]interface{}{"health_check": healthChecks}})
+
+		err := d.Set("health_checks", healthChecks)
 
 		if err != nil {
 			return errors.New("Failed to set health_checks: " + err.Error())
@@ -1238,95 +1060,68 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 	d.SetPartial("require_ports")
 
 	if app.PortDefinitions != nil && len(*app.PortDefinitions) > 0 {
-		// If there is a port mapping, do not set port definitions that comes from Marathon API and belong to the port mapping
-		if _, ok := d.GetOk("container.0.docker.0.port_mappings.0.port_mapping.#"); !ok {
-			portDefinitions := make([]map[string]interface{}, len(*app.PortDefinitions))
-			for idx, portDefinition := range *app.PortDefinitions {
-				hMap := make(map[string]interface{})
-				if portDefinition.Port != nil {
-					if _, ok := d.GetOk("port_definitions.0.port_definition." + strconv.Itoa(idx) + ".port"); ok {
-						hMap["port"] = *portDefinition.Port
-					}
-				}
-				if portDefinition.Protocol != "" {
-					hMap["protocol"] = portDefinition.Protocol
-				}
-				if portDefinition.Name != "" {
-					hMap["name"] = portDefinition.Name
-				}
-				if portDefinition.Labels != nil {
-					hMap["labels"] = *portDefinition.Labels
-				}
-				portDefinitions[idx] = hMap
+		portDefinitions := make([]map[string]interface{}, len(*app.PortDefinitions))
+		for idx, portDefinition := range *app.PortDefinitions {
+			hMap := make(map[string]interface{})
+			if portDefinition.Port != nil {
+				hMap["port"] = *portDefinition.Port
 			}
-			err := d.Set("port_definitions", &[]interface{}{map[string]interface{}{"port_definition": portDefinitions}})
+			if portDefinition.Protocol != "" {
+				hMap["protocol"] = portDefinition.Protocol
+			}
+			if portDefinition.Name != "" {
+				hMap["name"] = portDefinition.Name
+			}
+			if portDefinition.Labels != nil {
+				hMap["labels"] = *portDefinition.Labels
+			}
+			portDefinitions[idx] = hMap
+		}
+		err := d.Set("port_definitions", portDefinitions)
 
-			if err != nil {
-				return errors.New("Failed to set port_definitions: " + err.Error())
-			}
+		if err != nil {
+			return errors.New("Failed to set port_definitions: " + err.Error())
 		}
 	} else {
 		d.Set("port_definitions", nil)
-
-		if app.Ports != nil {
-			if givenFreePortsDoesNotEqualAllocated(d, app) {
-				err := d.Set("ports", app.Ports)
-
-				if err != nil {
-					return errors.New("Failed to set ports: " + err.Error())
-				}
-			}
-			d.SetPartial("ports")
-		}
 	}
 
-	if app.Residency != nil {
-		resMap := make(map[string]interface{})
-		resMap["task_lost_behavior"] = app.Residency.TaskLostBehavior
-		resMap["relaunch_escalation_timeout_seconds"] = app.Residency.RelaunchEscalationTimeoutSeconds
-		err := d.Set("residency", &[]interface{}{resMap})
-
-		if err != nil {
-			return errors.New("Failed to set residency: " + err.Error())
-		}
-	} //else {
-	//d.Set("residency", nil)
+	//if app.UpgradeStrategy != nil {
+	//	usMap := make(map[string]interface{})
+	//	usMap["minimum_health_capacity"] = *app.UpgradeStrategy.MinimumHealthCapacity
+	//	usMap["maximum_over_capacity"] = *app.UpgradeStrategy.MaximumOverCapacity
+	//	err := d.Set("upgrade_strategy", &[]interface{}{usMap})
+	//
+	//	if err != nil {
+	//		return errors.New("Failed to set upgrade_strategy: " + err.Error())
+	//	}
+	//} else {
+	//	d.Set("upgrade_strategy", nil)
 	//}
-	//d.SetPartial("residency")
-
-	if app.UpgradeStrategy != nil {
-		usMap := make(map[string]interface{})
-		usMap["minimum_health_capacity"] = *app.UpgradeStrategy.MinimumHealthCapacity
-		usMap["maximum_over_capacity"] = *app.UpgradeStrategy.MaximumOverCapacity
-		err := d.Set("upgrade_strategy", &[]interface{}{usMap})
-
-		if err != nil {
-			return errors.New("Failed to set upgrade_strategy: " + err.Error())
-		}
-	} else {
-		d.Set("upgrade_strategy", nil)
-	}
-	d.SetPartial("upgrade_strategy")
-
-	if app.UnreachableStrategy != nil {
-		unrMap := make(map[string]interface{})
-		if app.UnreachableStrategy.InactiveAfterSeconds != nil {
-			unrMap["inactive_after_seconds"] = *app.UnreachableStrategy.InactiveAfterSeconds
-		}
-		if app.UnreachableStrategy.ExpungeAfterSeconds != nil {
-			unrMap["expunge_after_seconds"] = *app.UnreachableStrategy.ExpungeAfterSeconds
-		}
-		if app.UnreachableStrategy.AbsenceReason == "" {
-			err := d.Set("unreachable_strategy", &[]interface{}{unrMap})
-			if err != nil {
-				return errors.New("Failed to set unreachable_strategy: " + err.Error())
-			}
-		}
-
-	} else {
-		d.Set("unreachable_strategy", nil)
-	}
-	d.SetPartial("unreachable_strategy")
+	//d.SetPartial("upgrade_strategy")
+	//
+	//if app.UnreachableStrategy != nil {
+	//	unrMap := make(map[string]interface{})
+	//	if app.UnreachableStrategy.InactiveAfterSeconds != nil {
+	//		unrMap["inactive_after_seconds"] = *app.UnreachableStrategy.InactiveAfterSeconds
+	//	} else {
+	//		unrMap["inactive_after_seconds"] = nil
+	//	}
+	//
+	//	if app.UnreachableStrategy.ExpungeAfterSeconds != nil {
+	//		unrMap["expunge_after_seconds"] = *app.UnreachableStrategy.ExpungeAfterSeconds
+	//	} else {
+	//		unrMap["expunge_after_seconds"] = nil
+	//	}
+	//
+	//	err := d.Set("unreachable_strategy", &[]interface{}{unrMap})
+	//	if err != nil {
+	//		return errors.New("Failed to set unreachable_strategy: " + err.Error())
+	//	}
+	//} else {
+	//	d.Set("unreachable_strategy", nil)
+	//}
+	//d.SetPartial("unreachable_strategy")
 
 	err = d.Set("kill_selection", app.KillSelection)
 	if err != nil {
@@ -1355,21 +1150,6 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 	return nil
 }
 
-func givenFreePortsDoesNotEqualAllocated(d *schema.ResourceData, app *marathon.Application) bool {
-	marathonPorts := make([]int, len(app.Ports))
-	for i, port := range app.Ports {
-		if port >= 10000 && port <= 20000 {
-			marathonPorts[i] = 0
-		} else {
-			marathonPorts[i] = port
-		}
-	}
-
-	ports := getPorts(d)
-
-	return !reflect.DeepEqual(marathonPorts, ports)
-}
-
 func resourceMarathonAppUpdate(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(config)
 	client := config.Client
@@ -1383,7 +1163,7 @@ func resourceMarathonAppUpdate(d *schema.ResourceData, meta interface{}) error {
 		return errors.New("Timeout getting an EventListener")
 	}
 
-	application := mutateResourceToApplication(d)
+	application := mapResourceToApplication(d)
 
 	deploymentID, err := client.UpdateApplication(application, false)
 	if err != nil {
@@ -1424,8 +1204,7 @@ func resourceMarathonAppDelete(d *schema.ResourceData, meta interface{}) error {
 	return nil
 }
 
-func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
-
+func mapResourceToApplication(d *schema.ResourceData) *marathon.Application {
 	application := new(marathon.Application)
 
 	if v, ok := d.GetOk("accepted_resource_roles.#"); ok {
@@ -1494,36 +1273,6 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 		application.Constraints = nil
 	}
 
-	if v, ok := d.GetOk("ipaddress.0.network_name"); ok {
-		t := v.(string)
-
-		discovery := new(marathon.Discovery)
-		discovery = discovery.EmptyPorts()
-
-		ipAddressPerTask := new(marathon.IPAddressPerTask)
-		ipAddressPerTask.Discovery = discovery
-
-		ipAddressPerTask.NetworkName = t
-
-		application = application.SetIPAddressPerTask(*ipAddressPerTask)
-	}
-
-	if v, ok := d.GetOk("networks.0.network.#"); ok {
-		networks := make([]marathon.Network, v.(int))
-
-		for i := range networks {
-			nMap := d.Get(fmt.Sprintf("networks.0.network.%d", i)).(map[string]interface{})
-
-			if val, ok := nMap["mode"].(string); ok {
-				networks[i].Mode = val
-			}
-			if val, ok := nMap["name"].(string); ok {
-				networks[i].Name = val
-			}
-		}
-		application.Networks = &networks
-	}
-
 	if v, ok := d.GetOk("container.0.type"); ok {
 		container := new(marathon.Container)
 		t := v.(string)
@@ -1542,13 +1291,9 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 				docker.ForcePullImage = &value
 			}
 
-			if v, ok := d.GetOk("container.0.docker.0.network"); ok {
-				docker.Network = v.(string)
-			}
-
-			if v, ok := d.GetOk("container.0.docker.0.parameters.0.parameter.#"); ok {
+			if v, ok := d.GetOk("container.0.docker.0.parameters.#"); ok {
 				for i := 0; i < v.(int); i++ {
-					paramMap := d.Get(fmt.Sprintf("container.0.docker.0.parameters.0.parameter.%d", i)).(map[string]interface{})
+					paramMap := d.Get(fmt.Sprintf("container.0.docker.0.parameters.%d", i)).(map[string]interface{})
 					docker.AddParameter(paramMap["key"].(string), paramMap["value"].(string))
 				}
 			}
@@ -1558,52 +1303,17 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 				docker.Privileged = &value
 			}
 
-			if v, ok := d.GetOk("container.0.docker.0.port_mappings.0.port_mapping.#"); ok {
-				portMappings := make([]marathon.PortMapping, v.(int))
-
-				for i := range portMappings {
-					portMapping := new(marathon.PortMapping)
-					portMappings[i] = *portMapping
-
-					pmMap := d.Get(fmt.Sprintf("container.0.docker.0.port_mappings.0.port_mapping.%d", i)).(map[string]interface{})
-
-					if val, ok := pmMap["container_port"]; ok {
-						portMappings[i].ContainerPort = val.(int)
-					}
-					if val, ok := pmMap["host_port"]; ok {
-						portMappings[i].HostPort = val.(int)
-					}
-					if val, ok := pmMap["protocol"]; ok {
-						portMappings[i].Protocol = val.(string)
-					}
-					if val, ok := pmMap["service_port"]; ok {
-						portMappings[i].ServicePort = val.(int)
-					}
-					if val, ok := pmMap["name"]; ok {
-						portMappings[i].Name = val.(string)
-					}
-
-					labelsMap := d.Get(fmt.Sprintf("container.0.docker.0.port_mappings.0.port_mapping.%d.labels", i)).(map[string]interface{})
-					labels := make(map[string]string, len(labelsMap))
-					for key, value := range labelsMap {
-						labels[key] = value.(string)
-					}
-					portMappings[i].Labels = &labels
-				}
-				docker.PortMappings = &portMappings
-			}
 			container.Docker = docker
-
 		}
 
-		if v, ok := d.GetOk("container.0.volumes.0.volume.#"); ok {
+		if v, ok := d.GetOk("container.0.volumes.#"); ok {
 			volumes := make([]marathon.Volume, v.(int))
 
 			for i := range volumes {
 				volume := new(marathon.Volume)
 				volumes[i] = *volume
 
-				volumeMap := d.Get(fmt.Sprintf("container.0.volumes.0.volume.%d", i)).(map[string]interface{})
+				volumeMap := d.Get(fmt.Sprintf("container.0.volumes.%d", i)).(map[string]interface{})
 
 				if val, ok := volumeMap["container_path"]; ok {
 					volumes[i].ContainerPath = val.(string)
@@ -1616,7 +1326,7 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 				}
 
 				if volumeMap["external"] != nil {
-					externalMap := d.Get(fmt.Sprintf("container.0.volumes.0.volume.%d.external.0", i)).(map[string]interface{})
+					externalMap := d.Get(fmt.Sprintf("container.0.volumes.%d.external.0", i)).(map[string]interface{})
 					if len(externalMap) > 0 {
 						external := new(marathon.ExternalVolume)
 						if val, ok := externalMap["name"]; ok {
@@ -1639,7 +1349,7 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 				}
 
 				if volumeMap["persistent"] != nil {
-					persistentMap := d.Get(fmt.Sprintf("container.0.volumes.0.volume.%d.persistent.0", i)).(map[string]interface{})
+					persistentMap := d.Get(fmt.Sprintf("container.0.volumes.%d.persistent.0", i)).(map[string]interface{})
 					if len(persistentMap) > 0 {
 						persistent := new(marathon.PersistentVolume)
 						if val, ok := persistentMap["type"]; ok {
@@ -1658,15 +1368,14 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 			container.Volumes = &volumes
 		}
 
-		// Marathon 1.5 support for portMapping
-		if v, ok := d.GetOk("container.0.port_mappings.0.port_mapping.#"); ok {
+		if v, ok := d.GetOk("container.0.port_mappings.#"); ok {
 			portMappings := make([]marathon.PortMapping, v.(int))
 
 			for i := range portMappings {
 				portMapping := new(marathon.PortMapping)
 				portMappings[i] = *portMapping
 
-				pmMap := d.Get(fmt.Sprintf("container.0.port_mappings.0.port_mapping.%d", i)).(map[string]interface{})
+				pmMap := d.Get(fmt.Sprintf("container.0.port_mappings.%d", i)).(map[string]interface{})
 
 				if val, ok := pmMap["container_port"]; ok {
 					portMappings[i].ContainerPort = val.(int)
@@ -1684,20 +1393,22 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 					portMappings[i].Name = val.(string)
 				}
 
-				labelsMap := d.Get(fmt.Sprintf("container.0.port_mappings.0.port_mapping.%d.labels", i)).(map[string]interface{})
+				labelsMap := d.Get(fmt.Sprintf("container.0.port_mappings.%d.labels", i)).(map[string]interface{})
 				labels := make(map[string]string, len(labelsMap))
 				for key, value := range labelsMap {
 					labels[key] = value.(string)
 				}
 				portMappings[i].Labels = &labels
 
-				netNamesList := d.Get(fmt.Sprintf("container.0.port_mappings.0.port_mapping.%d.network_names", i)).([]interface{})
+				netNamesList := d.Get(fmt.Sprintf("container.0.port_mappings.%d.network_names", i)).([]interface{})
 				netNames := make([]string, len(netNamesList))
 				for index, value := range netNamesList {
 					netNames[index] = value.(string)
 				}
+
 				portMappings[i].NetworkNames = &netNames
 			}
+
 			container.PortMappings = &portMappings
 		}
 
@@ -1765,28 +1476,14 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 		}
 
 		application.Fetch = &fetch
-	} else {
-		application.Fetch = nil
-
-		if v, ok := d.GetOk("uris.#"); ok {
-			uris := make([]string, v.(int))
-
-			for i := range uris {
-				uris[i] = d.Get("uris." + strconv.Itoa(i)).(string)
-			}
-
-			if len(uris) != 0 {
-				application.Uris = &uris
-			}
-		}
 	}
 
-	if v, ok := d.GetOk("health_checks.0.health_check.#"); ok {
+	if v, ok := d.GetOk("health_checks.#"); ok {
 		healthChecks := make([]marathon.HealthCheck, v.(int))
 
 		for i := range healthChecks {
 			healthCheck := new(marathon.HealthCheck)
-			mapStruct := d.Get("health_checks.0.health_check." + strconv.Itoa(i)).(map[string]interface{})
+			mapStruct := d.Get("health_checks." + strconv.Itoa(i)).(map[string]interface{})
 
 			commands := mapStruct["command"].([]interface{})
 			if len(commands) > 0 {
@@ -1880,125 +1577,117 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 		application.MaxLaunchDelaySeconds = &v
 	}
 
+	if v, ok := d.GetOk("networks.0.mode"); ok {
+		mode := v.(string)
+
+		var networkMode marathon.PodNetworkMode
+		name := ""
+		switch strings.ToLower(mode) {
+		case "host":
+			networkMode = marathon.HostNetworkMode
+		case "container/bridge":
+			networkMode = marathon.BridgeNetworkMode
+		case "container":
+			if n, ok := d.GetOk("networks.0.name"); ok {
+				name = n.(string)
+			}
+
+			networkMode = marathon.ContainerNetworkMode
+		}
+
+		application.SetNetwork(name, networkMode)
+	}
+
 	if v, ok := d.GetOk("require_ports"); ok {
 		v := v.(bool)
 		application.RequirePorts = &v
 	}
 
-	if v, ok := d.GetOk("port_definitions.0.port_definition.#"); ok {
-		if _, ok2 := d.GetOk("container.0.docker.0.port_mappings.0.port_mapping.#"); !ok2 {
-			portDefinitions := make([]marathon.PortDefinition, v.(int))
+	if v, ok := d.GetOk("port_definitions.#"); ok {
+		portDefinitions := make([]marathon.PortDefinition, v.(int))
 
-			for i := range portDefinitions {
-				portDefinition := new(marathon.PortDefinition)
-				mapStruct := d.Get("port_definitions.0.port_definition." + strconv.Itoa(i)).(map[string]interface{})
+		for i := range portDefinitions {
+			portDefinition := new(marathon.PortDefinition)
+			mapStruct := d.Get("port_definitions." + strconv.Itoa(i)).(map[string]interface{})
 
-				if prop, ok := mapStruct["port"]; ok {
-					prop := prop.(int)
-					portDefinition.Port = &prop
-				}
-
-				if prop, ok := mapStruct["protocol"]; ok {
-					portDefinition.Protocol = prop.(string)
-				}
-
-				if prop, ok := mapStruct["name"]; ok {
-					portDefinition.Name = prop.(string)
-				}
-
-				labelsMap := d.Get(fmt.Sprintf("port_definitions.0.port_definition.%d.labels", i)).(map[string]interface{})
-				labels := make(map[string]string, len(labelsMap))
-				for key, value := range labelsMap {
-					labels[key] = value.(string)
-				}
-
-				if len(labelsMap) > 0 {
-					portDefinition.Labels = &labels
-				}
-
-				portDefinitions[i] = *portDefinition
+			if prop, ok := mapStruct["port"]; ok {
+				prop := prop.(int)
+				portDefinition.Port = &prop
 			}
 
-			application.PortDefinitions = &portDefinitions
+			if prop, ok := mapStruct["protocol"]; ok {
+				portDefinition.Protocol = prop.(string)
+			}
+
+			if prop, ok := mapStruct["name"]; ok {
+				portDefinition.Name = prop.(string)
+			}
+
+			labelsMap := d.Get(fmt.Sprintf("port_definitions.%d.labels", i)).(map[string]interface{})
+			labels := make(map[string]string, len(labelsMap))
+			for key, value := range labelsMap {
+				labels[key] = value.(string)
+			}
+
+			if len(labelsMap) > 0 {
+				portDefinition.Labels = &labels
+			}
+
+			portDefinitions[i] = *portDefinition
 		}
-	} else {
-		if _, ok := d.GetOk("ports"); ok {
-			application.Ports = getPorts(d)
-		} else {
-			portDefinitions := make([]marathon.PortDefinition, 0)
-			application.PortDefinitions = &portDefinitions
-		}
+
+		application.PortDefinitions = &portDefinitions
 	}
 
-	residency := marathon.Residency{}
-
-	if v, ok := d.GetOk("residency.0.task_lost_behavior"); ok {
-		f, ok := v.(marathon.TaskLostBehaviorType)
-		if ok {
-			residency.TaskLostBehavior = f
-		}
-	}
-
-	if v, ok := d.GetOk("residency.0.relaunch_escalation_timeout_seconds"); ok {
-		f, ok := v.(int)
-		if ok {
-			residency.RelaunchEscalationTimeoutSeconds = f
-		}
-	}
-
-	if _, ok := d.GetOk("residency"); ok {
-		application.Residency = &residency
-	}
-
-	upgradeStrategy := marathon.UpgradeStrategy{}
-
-	if v, ok := d.GetOkExists("upgrade_strategy.0.minimum_health_capacity"); ok {
-		f, ok := v.(float64)
-		if ok {
-			upgradeStrategy.MinimumHealthCapacity = &f
-		}
-	} else {
-		f := 1.0
-		upgradeStrategy.MinimumHealthCapacity = &f
-	}
-
-	if v, ok := d.GetOkExists("upgrade_strategy.0.maximum_over_capacity"); ok {
-		f, ok := v.(float64)
-		if ok {
-			upgradeStrategy.MaximumOverCapacity = &f
-		}
-	} else {
-		f := 1.0
-		upgradeStrategy.MaximumOverCapacity = &f
-	}
-
-	if _, ok := d.GetOk("upgrade_strategy"); ok {
-		application.SetUpgradeStrategy(upgradeStrategy)
-	}
-
-	unreachableStrategy := marathon.UnreachableStrategy{}
-	if v, ok := d.GetOkExists("unreachable_strategy.0.inactive_after_seconds"); ok {
-		f, ok := v.(float64)
-		if ok {
-			unreachableStrategy.InactiveAfterSeconds = &f
-		}
-	}
-
-	if v, ok := d.GetOkExists("unreachable_strategy.0.expunge_after_seconds"); ok {
-		f, ok := v.(float64)
-		if ok {
-			unreachableStrategy.ExpungeAfterSeconds = &f
-		}
-	}
-
-	if v, ok := d.GetOk("unreachable_strategy"); ok {
-		switch v.(type) {
-		case string:
-			application.UnreachableStrategy = nil
-		default:
-			application.SetUnreachableStrategy(unreachableStrategy)
-		}
-	}
+	//upgradeStrategy := marathon.UpgradeStrategy{}
+	//
+	//if v, ok := d.GetOkExists("upgrade_strategy.0.minimum_health_capacity"); ok {
+	//	f, ok := v.(float64)
+	//	if ok {
+	//		upgradeStrategy.MinimumHealthCapacity = &f
+	//	}
+	//} else {
+	//	f := 1.0
+	//	upgradeStrategy.MinimumHealthCapacity = &f
+	//}
+	//
+	//if v, ok := d.GetOkExists("upgrade_strategy.0.maximum_over_capacity"); ok {
+	//	f, ok := v.(float64)
+	//	if ok {
+	//		upgradeStrategy.MaximumOverCapacity = &f
+	//	}
+	//} else {
+	//	f := 1.0
+	//	upgradeStrategy.MaximumOverCapacity = &f
+	//}
+    //
+	//if _, ok := d.GetOk("upgrade_strategy"); ok {
+	//	application.SetUpgradeStrategy(upgradeStrategy)
+	//}
+	//
+	//unreachableStrategy := marathon.UnreachableStrategy{}
+	//if v, ok := d.GetOkExists("unreachable_strategy.0.inactive_after_seconds"); ok {
+	//	f, ok := v.(float64)
+	//	if ok {
+	//		unreachableStrategy.InactiveAfterSeconds = &f
+	//	}
+	//}
+	//
+	//if v, ok := d.GetOkExists("unreachable_strategy.0.expunge_after_seconds"); ok {
+	//	f, ok := v.(float64)
+	//	if ok {
+	//		unreachableStrategy.ExpungeAfterSeconds = &f
+	//	}
+	//}
+	//
+	//if v, ok := d.GetOk("unreachable_strategy"); ok {
+	//	switch v.(type) {
+	//	case string:
+	//		application.UnreachableStrategy = nil
+	//	default:
+	//		application.SetUnreachableStrategy(unreachableStrategy)
+	//	}
+	//}
 
 	if v, ok := d.GetOk("kill_selection"); ok {
 		v := v.(string)
@@ -2011,18 +1700,6 @@ func mutateResourceToApplication(d *schema.ResourceData) *marathon.Application {
 	}
 
 	return application
-}
-
-func getPorts(d *schema.ResourceData) []int {
-	var ports []int
-	if v, ok := d.GetOk("ports.#"); ok {
-		ports = make([]int, v.(int))
-
-		for i := range ports {
-			ports[i] = d.Get("ports." + strconv.Itoa(i)).(int)
-		}
-	}
-	return ports
 }
 
 func isDcosFrameworkDeployComplete(d *schema.ResourceData, frameworkURL string, dcosToken string) (bool, error) {
