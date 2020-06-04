@@ -1,5 +1,7 @@
 module github.com/rolyv/terraform-provider-marathon
 
+go 1.14
+
 require (
 	github.com/PTC-GLOBAL/dcos-sdk-go v0.0.0-20180215134535-89086b591889 // indirect
 	github.com/apparentlymart/go-cidr v1.0.0 // indirect
@@ -16,11 +18,12 @@ require (
 	github.com/hashicorp/hil v0.0.0-20190212132231-97b3a9cdfa93 // indirect
 	github.com/hashicorp/logutils v1.0.0 // indirect
 	github.com/hashicorp/terraform v0.11.11
+	github.com/magiconair/properties v1.8.1
 	github.com/mitchellh/cli v1.0.0 // indirect
 	github.com/mitchellh/copystructure v1.0.0 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/mitchellh/hashstructure v1.0.0 // indirect
-	github.com/squeakysimple/dcos-sdk-go v0.0.0-20180215134535-89086b591889
+	github.com/squeakysimple/dcos-sdk-go v0.0.0-20180215134535-89086b591889 // indirect
 	github.com/zclconf/go-cty v0.0.0-20190212192503-19dda139b164 // indirect
 	golang.org/x/crypto v0.0.0-20190211182817-74369b46fc67 // indirect
 	golang.org/x/net v0.0.0-20190213061140-3a22650c66bd // indirect

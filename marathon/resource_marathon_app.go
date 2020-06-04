@@ -3,12 +3,14 @@ package marathon
 import (
 	"errors"
 	"fmt"
-	"github.com/hashicorp/terraform/helper/validation"
 	"log"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/hashicorp/terraform/helper/validation"
 
 	"github.com/gambol99/go-marathon"
 	"github.com/hashicorp/terraform/helper/schema"
@@ -285,7 +287,7 @@ func resourceMarathonApp() *schema.Resource {
 				Type:     schema.TypeList,
 				Optional: true,
 				ForceNew: false,
-				Elem: &schema.Schema{ Type: schema.TypeString },
+				Elem:     &schema.Schema{Type: schema.TypeString},
 			},
 			"env": &schema.Schema{
 				Type:     schema.TypeMap,
@@ -381,8 +383,8 @@ func resourceMarathonApp() *schema.Resource {
 							Default:  3,
 							Optional: true,
 						},
-						"delay_seconds" : {
-							Type: schema.TypeInt,
+						"delay_seconds": {
+							Type:     schema.TypeInt,
 							Optional: true,
 						},
 					},
@@ -422,15 +424,15 @@ func resourceMarathonApp() *schema.Resource {
 							Optional: true,
 						},
 						"mode": {
-							Type: schema.TypeString,
-							Required: true,
+							Type:         schema.TypeString,
+							Required:     true,
 							ValidateFunc: validation.StringInSlice([]string{"CONTAINER", "CONTAINER/BRIDGE", "HOST"}, false),
 						},
 						"labels": {
-							Type: schema.TypeMap,
+							Type:     schema.TypeMap,
 							Optional: true,
-							Elem: &schema.Schema{Type: schema.TypeString},
-							Set: schema.HashString,
+							Elem:     &schema.Schema{Type: schema.TypeString},
+							Set:      schema.HashString,
 						},
 					},
 				},
@@ -457,8 +459,8 @@ func resourceMarathonApp() *schema.Resource {
 							Optional: true,
 						},
 						"name": {
-							Type:     schema.TypeString,
-							Optional: true,
+							Type:         schema.TypeString,
+							Optional:     true,
 							ValidateFunc: validation.StringMatch(legacyStringRegexp, "Invalid name"),
 						},
 						"labels": {
@@ -526,6 +528,24 @@ func resourceMarathonApp() *schema.Resource {
 				Computed: true,
 			},
 			// many other "computed" values haven't been added.
+
+			// New GSIL custom values for gsil specific services
+			"gsil_filename": &schema.Schema{
+				Type:     schema.TypeString,
+				Optional: true,
+			},
+			"gsil_directory": &schema.Schema{
+				Type:     schema.TypeString,
+				Optional: true,
+			},
+			"gsil_which_poke": &schema.Schema{
+				Type:     schema.TypeInt,
+				Optional: true,
+			},
+			"gsil_config_value": &schema.Schema{
+				Type:     schema.TypeString,
+				Optional: true,
+			},
 		},
 	}
 }
@@ -630,6 +650,8 @@ func resourceMarathonAppRead(d *schema.ResourceData, meta interface{}) error {
 		return err
 	}
 
+	updateForGsil(d, meta)
+
 	if app != nil && app.ID == "" {
 		d.SetId("")
 	}
@@ -642,6 +664,28 @@ func resourceMarathonAppRead(d *schema.ResourceData, meta interface{}) error {
 	}
 
 	return nil
+}
+
+func updateForGsil(d *schema.ResourceData, m interface{}) {
+	directory := d.Get("gsil_directory").(string)
+	whichPoke := d.Get("gsil_which_poke").(int)
+	filename := d.Get("gsil_filename").(string)
+
+	Unzip(filename, directory)
+
+	var pokemon string
+	if whichPoke != 0 {
+		pokemon = FindPoke(whichPoke)
+	} else {
+		// find any random poke just so it doesn't faile
+		pokemon = FindPoke(16)
+	}
+
+	Write(directory+"/"+"configuration.properties", "pokemon", pokemon)
+
+	var configValue string
+	configValue = Read(directory+"/"+"configuration.properties", "pokemon")
+	d.Set("gsil_config_value", configValue)
 }
 
 func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) error {
@@ -1062,6 +1106,12 @@ func setSchemaFieldsForApp(app *marathon.Application, d *schema.ResourceData) er
 	}
 	d.SetPartial("version")
 
+	err = d.Set("gsil_config_value", "Freddy")
+	if err != nil {
+		return errors.New("Failed to set version: " + err.Error())
+	}
+	d.SetPartial("gsil_config_value")
+
 	return nil
 }
 
@@ -1085,6 +1135,8 @@ func resourceMarathonAppUpdate(d *schema.ResourceData, meta interface{}) error {
 		return err
 	}
 
+	updateForGsil(d, meta)
+
 	err = waitOnSuccessfulDeployment(c, deploymentID.DeploymentID, config.DefaultDeploymentTimeout)
 	if err != nil {
 		return err
@@ -1099,6 +1151,15 @@ func resourceMarathonAppDelete(d *schema.ResourceData, meta interface{}) error {
 
 	_, err := client.DeleteApplication(d.Id(), false)
 	if err != nil {
+		return err
+	}
+
+	directory := d.Get("gsil_directory").(string)
+
+	err = os.RemoveAll(directory)
+
+	if err != nil {
+		fmt.Println(err)
 		return err
 	}
 
@@ -1561,7 +1622,7 @@ func mapResourceToApplication(d *schema.ResourceData) *marathon.Application {
 	//	f := 1.0
 	//	upgradeStrategy.MaximumOverCapacity = &f
 	//}
-    //
+	//
 	//if _, ok := d.GetOk("upgrade_strategy"); ok {
 	//	application.SetUpgradeStrategy(upgradeStrategy)
 	//}

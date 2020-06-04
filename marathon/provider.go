@@ -53,7 +53,8 @@ func Provider() terraform.ResourceProvider {
 		},
 
 		ResourcesMap: map[string]*schema.Resource{
-			"marathon_app": resourceMarathonApp(),
+			//"marathon_app": resourceMarathonApp(),
+			"ham_app": resourceMarathonApp(),
 		},
 
 		ConfigureFunc: providerConfigure,
@@ -82,7 +83,7 @@ func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 	marathonConfig.HTTPSSEClient = &http.Client{}
 
 	config := config{
-		config: marathonConfig,
+		config:                   marathonConfig,
 		DefaultDeploymentTimeout: time.Duration(d.Get("deployment_timeout").(int)) * time.Second,
 	}
 
